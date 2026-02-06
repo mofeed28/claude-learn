@@ -15,19 +15,11 @@ Claude searches the web, scrapes the docs, and generates a skill file — all us
 
 ## Why?
 
-Paid tools like [Hyperbrowser](https://www.hyperbrowser.ai/) charge $30+/month for a `/learn` command that generates Claude Code skills from documentation. They need two API keys and a cloud browser.
+Claude Code agents are powerful, but they don't know every library or API out of the box. Instead of explaining the same docs over and over, just run `/learn` once and your agent has a permanent skill file it can reference anytime.
 
-This does the same thing for **$0**. No external dependencies. Just Claude Code's built-in `WebSearch` and `WebFetch`.
-
-| | Hyperbrowser | claude-learn |
-|---|---|---|
-| Cost | $30/mo + Serper API | **Free** |
-| API keys needed | 2 (Hyperbrowser + Serper) | **0** |
-| Setup | MCP server + config | **Copy 3 files** |
-| Local file support | No | **Yes** |
-| Subtopic focus | No | **Yes** (`react:hooks`) |
-| Skill updates | Yes | **Yes** (`/learn-update`) |
-| JS-heavy docs | Better (headless browser) | Falls back to GitHub/raw sources |
+- **No API keys** — uses Claude Code's built-in WebSearch and WebFetch
+- **No subscriptions** — completely free
+- **No setup** — copy 3 files and restart
 
 ---
 
@@ -39,14 +31,14 @@ Copy the 3 files from `commands/` into your `~/.claude/commands/` directory:
 
 ```bash
 # macOS / Linux
-git clone https://github.com/YOUR_USERNAME/claude-learn.git
+git clone https://github.com/mofeed28/claude-learn.git
 cd claude-learn
 bash install.sh
 ```
 
 ```powershell
 # Windows
-git clone https://github.com/YOUR_USERNAME/claude-learn.git
+git clone https://github.com/mofeed28/claude-learn.git
 cd claude-learn
 .\install.ps1
 ```
