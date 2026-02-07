@@ -20,12 +20,14 @@ Copy-Item "$SourceDir\learn.md" "$CommandsDir\learn.md" -Force
 Copy-Item "$SourceDir\learn-update.md" "$CommandsDir\learn-update.md" -Force
 Copy-Item "$SourceDir\learn-list.md" "$CommandsDir\learn-list.md" -Force
 Copy-Item "$SourceDir\learn-delete.md" "$CommandsDir\learn-delete.md" -Force
+Copy-Item "$SourceDir\learn-audit.md" "$CommandsDir\learn-audit.md" -Force
 
 Write-Host "  Installed:" -ForegroundColor Green
 Write-Host "    /learn        -> $CommandsDir\learn.md"
 Write-Host "    /learn-update -> $CommandsDir\learn-update.md"
 Write-Host "    /learn-list   -> $CommandsDir\learn-list.md"
 Write-Host "    /learn-delete -> $CommandsDir\learn-delete.md"
+Write-Host "    /learn-audit  -> $CommandsDir\learn-audit.md"
 Write-Host ""
 Write-Host "  Restart Claude Code, then try:" -ForegroundColor Yellow
 Write-Host "    /learn stripe"
