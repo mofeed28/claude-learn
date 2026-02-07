@@ -45,6 +45,7 @@ class _TagStripper(HTMLParser):
         self.code_blocks: list[str] = []
         self.links: list[str] = []
         self._skip_depth = 0
+        self._skip_stack: list[str] = []  # tracks which tags triggered skipping
         self._in_code = False
         self._code_buffer: list[str] = []
         self._current_tag = ""
@@ -55,9 +56,10 @@ class _TagStripper(HTMLParser):
         attr_dict = dict(attrs)
         classes = (attr_dict.get("class") or "").lower().split()
 
-        # Skip navigation/boilerplate elements
+        # Skip navigation/boilerplate elements (by tag name or CSS class)
         if tag in self.SKIP_TAGS or any(c in self.SKIP_CLASSES for c in classes):
             self._skip_depth += 1
+            self._skip_stack.append(tag)
             return
 
         if self._skip_depth > 0:
@@ -86,7 +88,9 @@ class _TagStripper(HTMLParser):
             self.output.append("\n")
 
     def handle_endtag(self, tag: str):
-        if tag in self.SKIP_TAGS:
+        # Check if this closing tag matches a skip-triggering open tag
+        if self._skip_stack and tag == self._skip_stack[-1]:
+            self._skip_stack.pop()
             self._skip_depth = max(0, self._skip_depth - 1)
             return
 

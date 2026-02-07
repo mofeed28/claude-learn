@@ -221,3 +221,25 @@ class TestEdgeCases:
         html = "<<<<<>>>>>just text here with no real tags"
         result = extract_content(html)
         assert "just text" in result.text or result.word_count >= 0
+
+    def test_class_based_skip_depth_recovery(self):
+        """Class-based skipping should not leak into subsequent siblings."""
+        html = """
+        <div class="sidebar">Sidebar nav content should be hidden</div>
+        <div class="content"><p>Real documentation here that matters a lot</p></div>
+        """
+        result = extract_content(html)
+        assert "Real documentation" in result.text
+        assert "Sidebar nav" not in result.text
+
+    def test_nested_skip_class_recovery(self):
+        """Nested skip-class elements should properly restore depth."""
+        html = """
+        <div class="navbar">
+            <div class="menu">Menu items to skip entirely</div>
+        </div>
+        <main><p>Important content that must appear in output</p></main>
+        """
+        result = extract_content(html)
+        assert "Important content" in result.text
+        assert "Menu items" not in result.text

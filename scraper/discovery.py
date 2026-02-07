@@ -165,3 +165,127 @@ def find_sitemap_urls(base_url: str) -> list[str]:
         f"{origin}/sitemap_index.xml",
         f"{origin}/robots.txt",
     ]
+
+
+def find_changelog_urls(base_url: str, topic: str) -> list[str]:
+    """Generate candidate changelog/release URLs for a library.
+
+    Checks common changelog locations: GitHub releases, CHANGELOG files,
+    and common docs paths.
+    """
+    parsed = urlparse(base_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    candidates = [
+        f"{origin}/changelog",
+        f"{origin}/CHANGELOG",
+        f"{origin}/CHANGELOG.md",
+        f"{origin}/releases",
+        f"{origin}/docs/changelog",
+        f"{origin}/docs/releases",
+        f"{origin}/whats-new",
+        f"{origin}/blog/releases",
+    ]
+
+    # GitHub-specific patterns
+    if "github.com" in parsed.netloc:
+        # e.g. https://github.com/honojs/hono -> /honojs/hono/releases
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) >= 2:
+            repo_path = "/".join(path_parts[:2])
+            candidates.extend([
+                f"{origin}/{repo_path}/releases",
+                f"{origin}/{repo_path}/blob/main/CHANGELOG.md",
+                f"{origin}/{repo_path}/blob/master/CHANGELOG.md",
+            ])
+
+    return candidates
+
+
+# Common version patterns found in documentation
+_VERSION_PATTERNS = [
+    # "v1.2.3" or "V1.2.3"
+    re.compile(r"\bv(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)\b", re.IGNORECASE),
+    # "version 1.2.3" or "Version: 1.2.3"
+    re.compile(r"\bversion[:\s]+(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)\b", re.IGNORECASE),
+    # "@scope/package@1.2.3" (npm)
+    re.compile(r"@[\w-]+/[\w-]+@(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE),
+    # "package@1.2.3" (npm)
+    re.compile(r"[\w-]+@(\d+\.\d+(?:\.\d+)?)\b"),
+]
+
+
+def detect_version(text: str, topic: str = "") -> str | None:
+    """Detect the library version from documentation text.
+
+    Scans for version patterns and returns the most likely current version.
+    Returns None if no version can be detected.
+    """
+    if not text:
+        return None
+
+    # Collect all version candidates with positions
+    candidates: dict[str, int] = {}  # version -> earliest position
+
+    for pattern in _VERSION_PATTERNS:
+        for match in pattern.finditer(text):
+            version = match.group(1)
+            pos = match.start()
+            # Keep earliest occurrence (more likely to be the current version)
+            if version not in candidates or pos < candidates[version]:
+                candidates[version] = pos
+
+    if not candidates:
+        return None
+
+    # Sort by frequency (most common first), then by position (earliest first)
+    version_counts: dict[str, int] = {}
+    for pattern in _VERSION_PATTERNS:
+        for match in pattern.finditer(text):
+            v = match.group(1)
+            version_counts[v] = version_counts.get(v, 0) + 1
+
+    ranked = sorted(
+        candidates.keys(),
+        key=lambda v: (-version_counts.get(v, 0), candidates[v]),
+    )
+
+    return ranked[0] if ranked else None
+
+
+def extract_changelog_entries(text: str, limit: int = 5) -> list[dict]:
+    """Extract recent changelog entries from changelog/release notes text.
+
+    Returns a list of dicts with 'version', 'date', and 'summary' keys.
+    """
+    entries: list[dict] = []
+
+    # Pattern: "## v1.2.3" or "## 1.2.3 (2024-01-15)" or "# Version 1.2.3"
+    heading_pattern = re.compile(
+        r"^#{1,3}\s+(?:v(?:ersion)?\s*)?(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)"
+        r"(?:\s*[\(\[]\s*(\d{4}-\d{2}-\d{2})\s*[\)\]])?",
+        re.MULTILINE | re.IGNORECASE,
+    )
+
+    matches = list(heading_pattern.finditer(text))
+
+    for i, match in enumerate(matches[:limit]):
+        version = match.group(1)
+        date = match.group(2) or ""
+
+        # Extract summary: text between this heading and the next
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else start + 500
+        summary_text = text[start:end].strip()
+
+        # Trim to first few lines
+        summary_lines = summary_text.split("\n")[:5]
+        summary = "\n".join(line.strip() for line in summary_lines if line.strip())
+
+        entries.append({
+            "version": version,
+            "date": date,
+            "summary": summary[:300],
+        })
+
+    return entries

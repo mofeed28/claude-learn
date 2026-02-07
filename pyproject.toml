@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-learn-scraper"
+version = "0.1.0"
+description = "Runtime web scraper for claude-learn skill file generation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+claude-learn-scraper = "scraper.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["scraper*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["scraper/tests"]
