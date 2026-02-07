@@ -655,19 +655,86 @@ Tip: For more complete coverage, try:
 ## Special Modes
 
 ### Update mode
-If the user runs `/learn {topic}` and the skill already exists, you are updating it. Merge new information with existing content. Don't lose existing customizations. Preserve any lines or sections marked with `<!-- user -->`.
+If the user runs `/learn {topic}` and the skill already exists, you are updating it:
+1. Read the existing skill first
+2. Preserve all `<!-- user -->` marked lines and custom sections
+3. Merge new content with existing content — don't overwrite blindly
+4. Update frontmatter (`version`, `generated`, add `type` if missing)
+5. Keep the existing section order if it differs from template
+6. After merge, run all Phase 7 quality gates on the result
+7. In the report, show what changed: added sections, updated sections, preserved customizations
 
 ### Focused mode
-If the user uses colon syntax like `/learn react:hooks` or `/learn stripe:webhooks`, generate a skill focused specifically on that subtopic, not the entire technology.
+If the user uses colon syntax like `/learn react:hooks` or `/learn stripe:webhooks`:
+1. The part before `:` is the technology, the part after is the subtopic
+2. Classify the library type based on the parent technology, not the subtopic
+3. All web searches should include both: `"react hooks"` and `"react hooks API"`
+4. The skill slug uses a hyphen: `react:hooks` → `react-hooks`
+5. The skill should be self-contained — include enough context about the parent technology that an agent doesn't need the parent skill
+6. Include: how hooks relate to the broader React model, installation (if different), all hook APIs, and patterns specific to this subtopic
+7. The `description` field should reference both the parent and subtopic: `"React Hooks API. Use when managing state with useState, side effects with useEffect, context with useContext, refs with useRef, or building custom hooks."`
 
 ### Local file mode
-If the user passes a file path like `/learn ./docs/api.yaml` or `/learn C:\specs\openapi.json`, read the file directly. This produces the best quality skills because you have the raw source. Support these formats:
-- Markdown (.md)
-- API Blueprint (.apib)
-- OpenAPI/Swagger (.yaml, .yml, .json)
-- Plain text (.txt)
-- PDF (.pdf)
-- Any other text-based format
+If the user passes a file path like `/learn ./docs/api.yaml` or `/learn C:\specs\openapi.json`, read the file directly. This produces the best quality skills because you have the raw source.
+
+**Supported formats:**
+| Format | Extensions | How to process |
+|--------|-----------|---------------|
+| Markdown | `.md` | Read directly, extract sections |
+| API Blueprint | `.apib` | Parse resource groups, actions, parameters |
+| OpenAPI/Swagger | `.yaml`, `.yml`, `.json` | Parse paths, schemas, parameters, responses |
+| PDF | `.pdf` | Read with pages parameter for large PDFs |
+| Plain text | `.txt` | Read directly, infer structure |
+
+**For OpenAPI files:** Extract endpoints, parameters, request/response schemas, error codes, and authentication directly from the spec. This is the richest possible input — every parameter has a type, required status, and description already defined. Generate the most complete API Reference section possible from this data.
+
+**For large files (500+ lines):** Read in chunks. Focus on the API surface (endpoints, functions, classes) first, then fill in examples and patterns.
+
+After processing the local file, still run a quick web search (`"$TOPIC official documentation"`) to find the docs URL, GitHub repo, version info, and any patterns not covered in the file.
 
 ### GitHub URL mode
-If the user passes a GitHub URL like `/learn https://github.com/honojs/hono`, extract the owner/repo, fetch the README, metadata, and docs folder, then supplement with web search. This often produces better results than a plain topic name because you get the exact source.
+If the user passes a GitHub URL like `/learn https://github.com/honojs/hono`:
+1. Extract `{owner}` and `{repo}` from the URL
+2. Fetch in parallel:
+   - README: `https://raw.githubusercontent.com/{owner}/{repo}/main/README.md` (try `master` if fails)
+   - Metadata: `gh api repos/{owner}/{repo}` — get description, homepage, language, stars, topics
+   - Docs folder: `gh api repos/{owner}/{repo}/contents/docs` — fetch all `.md` files found
+   - Package info: Check `package.json` / `pyproject.toml` / `Cargo.toml` in the repo root for version
+3. Use the `homepage` field from metadata as the docs URL — add it to the URL queue for Phase 3
+4. Use the `topics` field from metadata to help classify the library type
+5. Supplement with web search using the repo name as the topic
+
+---
+
+## Error Recovery
+
+If the pipeline encounters problems, follow these recovery strategies:
+
+### No search results found
+- Try alternate names: `"stripe-node"` instead of `"stripe"`, or `"expressjs"` instead of `"express"`
+- Try broader queries: `"$TOPIC library"`, `"$TOPIC npm"`, `"$TOPIC python package"`
+- If still nothing, report to the user and suggest providing a local file or URL
+
+### All pages fail to scrape (JS SPA docs)
+- Exhaust ALL fallback sources from Strategy E (GitHub raw, wiki, npm, Wayback, StackOverflow)
+- Try fetching the GitHub repo directly (extract owner/repo from search results)
+- If you get at least a README and npm/PyPI page, proceed with generation — note reduced coverage in the report
+- If truly nothing scraped, report the failure and suggest: `/learn ./path/to/local/docs`
+
+### Insufficient content for quality gates
+- If the skill would fail G7 (minimum code examples) or G11 (minimum 80 lines):
+  - Go back to Phase 3 and run targeted searches for the missing content areas
+  - Try different search queries: `"$TOPIC examples"`, `"$TOPIC tutorial"`, `"$TOPIC cookbook"`
+  - If still insufficient after second research pass, generate the best skill possible and include a warning in the report: "This skill has limited coverage. For a more complete skill, try `/learn $TOPIC --deep` or provide local docs."
+- Never generate an empty or stub skill — either produce something useful or report failure
+
+### Version not detected
+- Default to `"unknown"` in frontmatter — never guess
+- Note in the report: "Version could not be detected from package registries"
+- The skill is still usable without a version — staleness detection will flag it for update later
+
+### Duplicate/conflicting information from sources
+- Always prefer higher-scored sources (official docs > blog posts)
+- For parameter names/types: trust the official API reference over tutorials
+- For code patterns: trust recently-dated sources over older ones
+- If genuinely conflicting (e.g., two official docs disagree), include both and note the conflict
