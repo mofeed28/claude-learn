@@ -83,6 +83,27 @@ Store the detected language as `$LANGUAGE` for use in Phase 5.
 
 ---
 
+## Phase 2.5: Classify Library Type
+
+After detecting the language, classify the topic into one of these library types. This determines which sections to emphasize and how to structure examples.
+
+| Type | Signals | Example | Emphasis |
+|------|---------|---------|----------|
+| `api-client` | Wraps a REST/GraphQL API, needs API keys, has request/response patterns | Stripe SDK, Twilio, OpenAI | Auth setup, endpoint tables, request/response examples, error codes, rate limits, webhooks |
+| `framework` | Provides app structure, has routing/middleware/lifecycle, you build on top of it | Hono, Express, FastAPI, Rails | Routing, middleware, project structure, deployment, context objects, plugin ecosystem |
+| `ui-library` | Renders UI components, has component APIs, props/slots | React, Vue, Shadcn, Radix | Component props tables, composition patterns, styling, accessibility, state management |
+| `orm-db` | Database abstraction, has schema/query/migration patterns | Drizzle, Prisma, SQLAlchemy | Schema definition, query patterns, migrations, relations, transactions, raw queries |
+| `cli-tool` | Command-line interface, has subcommands/flags | esbuild, Vite, turbo | Command reference table, config file format, common flag combos, CI/CD usage |
+| `utility` | Helper functions, no app structure, import-and-use | Lodash, Zod, date-fns | Function signatures, chaining/composition, tree-shaking, type inference |
+| `platform` | Cloud service SDK, infra management | AWS SDK, Supabase, Firebase | Service-specific setup, IAM/auth, resource management, pricing gotchas |
+| `testing` | Test runner or assertion library | Vitest, pytest, Playwright | Test structure, matchers/assertions, mocking, fixtures, CI integration |
+
+**How to classify:** Use the first web search results and GitHub description to determine the type. If a topic spans multiple types (e.g., Supabase is both `platform` and `orm-db`), pick the **primary** type and note the secondary. Store as `$LIB_TYPE`.
+
+**If unsure**, default to `utility` — it has the most generic template and works for anything.
+
+---
+
 ## Phase 3: Multi-Strategy Research
 
 Run these search strategies **in parallel** where possible. The goal is to find the best sources, not all sources.
@@ -307,28 +328,52 @@ Derive the slug: lowercase the topic name, replace spaces and special characters
 
 Create the directory and file at: `~/.claude/skills/{slug}/SKILL.md`
 
-### Required Structure
+### 6.1 Frontmatter
 
 ```markdown
 ---
 name: {slug}
-description: {A specific, trigger-word-rich sentence. This is what Claude uses to decide when to activate the skill. Be precise. Bad: "Helps with Stripe". Good: "Stripe payment processing API. Use when integrating payments, creating charges, managing subscriptions, handling webhooks, or working with Stripe Elements/Checkout."}
+description: {A specific, trigger-word-rich sentence. 20+ words. This is what Claude uses to decide when to activate the skill. Be precise about WHAT it does and WHEN to use it. Bad: "Helps with Stripe". Good: "Stripe payment processing API. Use when integrating payments, creating charges, managing subscriptions, handling webhooks, or working with Stripe Elements/Checkout."}
 version: "{current stable version, e.g. 4.2.1}"
 generated: "{YYYY-MM-DD}"
 language: {detected language, e.g. typescript, python, rust — or "multi" if multi-language}
+type: {$LIB_TYPE from Phase 2.5, e.g. framework, api-client, utility}
 tags: [{3-8 relevant tags, e.g. payments, api, webhooks, sdk}]
 ---
+```
 
+### 6.2 Type-Aware Section Emphasis
+
+Based on `$LIB_TYPE`, adjust which sections get the most depth and detail:
+
+| Section | `api-client` | `framework` | `ui-library` | `orm-db` | `cli-tool` | `utility` | `platform` | `testing` |
+|---------|-------------|-------------|--------------|---------|-----------|----------|-----------|----------|
+| Quick Reference | endpoints table | routing table | component list | query patterns | command table | function list | services table | assertion list |
+| Installation & Setup | + auth/API keys | + project scaffold | + peer deps | + DB connection | + global install | minimal | + IAM/credentials | + config file |
+| Core Concepts | request lifecycle | middleware chain | component model | schema→query flow | config cascade | composition | service model | test lifecycle |
+| API Reference | **★ primary** | route handlers | **★ props tables** | **★ query builder** | **★ flags/options** | **★ primary** | **★ primary** | matchers |
+| Common Patterns | CRUD + webhooks | **★ primary** | **★ composition** | migrations + joins | **★ recipes** | chaining | **★ primary** | **★ primary** |
+| Error Handling | **★ error codes** | middleware errors | prop warnings | query/connection errors | exit codes | validation errors | **★ service errors** | test failures |
+| TypeScript | response types | context typing | **★ prop types** | schema types | — | **★ generics** | SDK types | type matchers |
+| Testing | mock API calls | **★ test server** | component tests | **★ test DB** | snapshot tests | unit tests | mock services | — |
+
+**★ = this is the highest-value section for this library type. Spend the most effort here. This section should be the longest and most detailed.**
+
+### 6.3 Required Structure
+
+```markdown
 # {Technology Name} Skill
 
 ## When to Use This Skill
 
 Use this skill when the user needs to:
 - {5-10 specific trigger scenarios as bullet points}
+- {Include VERBS that an agent would match: "create", "configure", "debug", "migrate", "deploy", etc.}
+- {Include NOUNS specific to this technology: "webhook", "middleware", "schema", "route", etc.}
 
 ## Overview
 
-{2-3 sentences: what it is, what problem it solves, key characteristics}
+{2-3 sentences: what it is, what problem it solves, key characteristics. Mention the runtime/ecosystem.}
 
 **Key links:**
 - Docs: {url}
@@ -337,60 +382,105 @@ Use this skill when the user needs to:
 
 ## Prerequisites
 
-{Only include if there are specific requirements. Omit if standard.}
 - Runtime: {e.g. Node.js >= 18, Python >= 3.9}
 - Peer dependencies: {if any}
 - Related skills: {if other installed skills pair with this one}
 
 ## Quick Reference
 
-{The most important info at a glance. Use a table for API endpoints, CLI commands, or method signatures. This section should answer "what's the most common thing I need to do?" in 10 seconds.}
+{The most important info at a glance. MUST be a table. This section should answer "what's the most common thing I need to do?" in 10 seconds.}
+
+{For api-client: endpoint → method → description table}
+{For framework: HTTP method → route syntax → handler example table}
+{For ui-library: component → key props → usage table}
+{For orm-db: operation → syntax → description table}
+{For cli-tool: command → flags → description table}
+{For utility: function → signature → description table}
+{For platform: service → key method → description table}
+{For testing: assertion → syntax → description table}
 
 ## Installation & Setup
 
 {How to install, configure, authenticate. Include actual commands.}
+{For api-client/platform: MUST include API key setup, environment variable configuration}
+{For framework: include both "new project" and "add to existing" paths}
+{For orm-db: include database connection setup}
 
 ## Core Concepts
 
-{Key mental models the agent needs. Keep it brief — bullet points or short paragraphs, not essays.}
+{Key mental models the agent needs. Keep it brief — bullet points or short paragraphs.}
+{Explain the 3-5 things someone MUST understand before using this effectively.}
+{Use the mental model that matches the library type — see Section Emphasis table above.}
 
 ## API Reference
 
-{The meat of the skill. Detailed parameter tables, method signatures, endpoints.}
+{The meat of the skill. Group by logical function, not alphabetically.}
 
-### {Endpoint/Method Group 1}
+### {Method/Endpoint Group 1}
 
-{Description}
+{One-line description}
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| ... | ... | ... | ... | ... |
+
+**Returns:** `{ReturnType}` — {what it returns}
 
 **Example:**
 ```{language}
 import { ... } from '...';
-// real working code example with imports
+
+// Complete, runnable example — not a fragment
 ```
+
+**Gotcha:** {One-line warning about a common mistake, if applicable}
+
+### {Method/Endpoint Group 2}
+{...repeat for each group...}
 
 ## Common Patterns
 
-{3-5 typical usage patterns with complete, working code examples}
+{3-5 patterns, each with a descriptive ### heading and complete code example.}
+{Every pattern must solve a REAL task, not demonstrate syntax.}
+
+### {Pattern 1: Descriptive Name}
+```{language}
+// Full working example with imports, error handling, and comments on non-obvious lines
+```
+
+### {Pattern 2: Descriptive Name}
+```{language}
+// ...
+```
 
 ## Error Handling
 
-{Common errors, what causes them, how to fix them}
+{Common errors, what causes them, how to fix them. MUST be a table.}
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| ... | ... | ... |
+| {Error name/code} | {What triggers it} | {How to resolve — be specific} |
+
+{For api-client: include HTTP status codes and API-specific error objects}
+{For orm-db: include connection errors, query errors, migration errors}
+{For framework: include middleware errors, routing errors}
 
 ## TypeScript Integration
 
-{Only include for JS/TS libraries. Key types, generics, inference patterns.}
+{Only include for JS/TS libraries.}
+{Key types, generics, inference patterns. Show the types that developers struggle with most.}
+
+```typescript
+// Type examples that are genuinely useful, not just "here's the type definition"
+```
 
 ## Testing
 
-{How to mock/test code using this library. Test utilities provided.}
+{How to mock/test code using this library.}
+{Include test setup, mocking strategy, and at least one complete test example.}
+
+```{language}
+// Complete test example with imports, setup, assertion
+```
 
 ## Deprecated / Avoid
 
@@ -398,7 +488,10 @@ import { ... } from '...';
 
 | Deprecated API | Replacement | Since Version |
 |----------------|-------------|---------------|
-| ... | ... | ... |
+| {old way} | {new way — with example} | {version} |
+
+**Common mistakes to avoid:**
+- {Mistake 1} — {why it's wrong and what to do instead}
 
 ## Migration Notes
 
@@ -410,7 +503,7 @@ import { ... } from '...';
 
 ## Important Rules
 
-{Numbered list of critical things to remember}
+{Numbered list of critical things to remember. These should be things that cause BUGS or WASTED TIME if forgotten.}
 
 1. **{Rule}** — {explanation}
 2. ...
@@ -422,15 +515,15 @@ import { ... } from '...';
 - `{skill-name}` — {how it relates}
 ```
 
-### Section Rules by Depth
+### 6.4 Section Rules by Depth
 
 | Section | `--quick` | default | `--deep` |
 |---------|-----------|---------|----------|
 | When to Use | 3-5 bullets | 5-10 bullets | 5-10 bullets |
 | Overview | 1-2 sentences | 2-3 sentences | 3-5 sentences |
 | Prerequisites | omit | include if relevant | always include |
-| Quick Reference | include | include | include |
-| Installation & Setup | include | include | include |
+| Quick Reference | include (1 table) | include (1-2 tables) | include (full tables) |
+| Installation & Setup | basic install | install + config | install + config + deploy |
 | Core Concepts | 3-5 bullets | full section | full + advanced |
 | API Reference | top 5-10 APIs | core APIs | full API surface |
 | Common Patterns | 2-3 patterns | 3-5 patterns | 5-10 patterns |
@@ -442,46 +535,120 @@ import { ... } from '...';
 | Important Rules | 3-5 rules | 5-10 rules | 10+ rules |
 | Related Skills | omit | include | include |
 
-### Quality Rules
+### 6.5 Quality Rules
 
+**Content rules:**
 - **Tables over prose** for anything with parameters, options, or codes
-- **Real code examples** — never pseudocode, never `// do something here`
+- **Real code examples** — never pseudocode, never `// do something here`. Every example must be copy-pasteable.
 - **No placeholder sections** — if you don't have info for a section, omit it entirely rather than writing "TODO" or "See docs"
 - **No real API keys** — always use `YOUR_API_KEY`, `YOUR_SECRET`, etc.
-- **Case-sensitive names** — match the exact casing from official docs
-- **Include imports** in every code example — agents need complete, copy-pasteable code
+- **Case-sensitive names** — match the exact casing from official docs (e.g., `useState` not `usestate`)
+- **Include imports** in every code example — agents need complete, self-contained code
 - **Language-specific examples** — all code examples must be in `$LANGUAGE`. If multi-language, use the detected project language, falling back to the library's primary language
-- **Concise** — if a section would exceed 50 lines, break it into subsections or trim to the most important parts
 - **All code blocks must have a language specifier** (```typescript, ```python, etc. — never bare ```)
 - **No `any` types in TypeScript examples** — use proper types, generics, or `unknown` if truly needed
 
+**Structural rules:**
+- **Concise** — if a section would exceed 50 lines, break it into subsections or trim to the most important parts
+- **Every API Reference entry needs:** parameter table + return type + example + (optional) gotcha
+- **Every Common Pattern needs:** descriptive heading + complete code example + (optional) explanation
+- **Error Handling must be a table** — no prose-only error sections
+- **Quick Reference must be a table** — this is the "cheat sheet" section
+- **Group API Reference by function**, not alphabetically — group "read" methods together, "write" methods together, etc.
+
+**Code example rules:**
+- Minimum **4 code examples** in default mode, **2** in `--quick`, **8** in `--deep`
+- Each example must include **all imports** needed to run it
+- Each example must handle **the most common error case** (try/catch or error callback)
+- At least one example must show a **real-world workflow** (not just "hello world")
+- At least one example must show **error handling** in practice
+- For `api-client` type: at least one example must show **authentication setup**
+- For `framework` type: at least one example must show **middleware usage**
+- For `orm-db` type: at least one example must show a **multi-step transaction or join**
+
 ---
 
-## Phase 7: Verify & Report
+## Phase 7: Self-Critique & Quality Gate
 
-After writing the file:
+After writing the file, **read it back** with the Read tool and run it through a rigorous quality check. This is the most important phase — a bad skill file is worse than no skill file, because it teaches an agent wrong patterns.
 
-1. Read it back with the Read tool
-2. Verify:
-   - Frontmatter has `name`, `description`, `version`, `generated`, `language`, and `tags`
-   - Description contains specific trigger words (not generic) and is at least 20 words
-   - All code blocks have a language specifier (no bare ```)
-   - Every code example includes import statements
-   - No `any` types in TypeScript examples
-   - All markdown tables have consistent column counts (no mismatched `|` separators)
-   - At least 3 code examples exist (at least 2 in `--quick` mode)
-   - No `TODO`, `TBD`, `...`, or placeholder text remains
-   - Tables are properly formatted
-   - File is between 50-500 lines (warn if outside this range — under 50 means too sparse, over 500 means consider splitting)
-3. Fix any issues found during verification before reporting
-4. Report to the user:
-   - Skill path: `~/.claude/skills/{slug}/SKILL.md`
-   - Version detected: `{version}`
-   - Language: `{language}`
-   - Sources used (list the URLs you successfully scraped)
-   - Coverage assessment: what % of the API/docs you covered
-   - Anything you couldn't find or that needs manual additions
-   - If sources were limited, suggest: "If you have local docs or an API spec file, run `/learn path/to/file` for a more complete skill"
+### 7.1 Quality Rubric (score each 0-10)
+
+Score the generated skill on each dimension:
+
+| Dimension | What to check | 0 (fail) | 5 (passable) | 10 (excellent) |
+|-----------|--------------|----------|--------------|-----------------|
+| **Completeness** | Are all applicable sections present and filled? | Missing 3+ sections | All sections present, some thin | All sections thorough and detailed |
+| **Accuracy** | Do parameter names, types, and defaults match official docs? | Multiple wrong params | Mostly correct, minor gaps | Every param verified against source |
+| **Code Quality** | Are examples runnable, with imports, error handling? | Missing imports, pseudocode | Imports present, basic examples | Production-grade examples with edge cases |
+| **Trigger Coverage** | Would an agent find this skill when it's needed? | Generic description | Good keywords | Specific verbs + nouns covering all use cases |
+| **Actionability** | Can an agent USE this without reading external docs? | Needs external docs for basics | Can handle common tasks | Can handle complex tasks independently |
+| **Structure** | Tables vs prose, section organization, scanability | Wall of text | Some tables, okay structure | Well-organized tables, clear hierarchy |
+
+### 7.2 Hard Quality Gates
+
+These are **non-negotiable**. If any gate fails, fix the issue before proceeding.
+
+| Gate | Check | Auto-fix? |
+|------|-------|-----------|
+| G1 | Frontmatter has ALL fields: `name`, `description`, `version`, `generated`, `language`, `type`, `tags` | Yes |
+| G2 | `description` is 20+ words and contains specific trigger keywords (not generic) | Yes — rewrite it |
+| G3 | All code blocks have a language specifier (no bare ```) | Yes |
+| G4 | Every code example includes import/require statements | Yes — add imports |
+| G5 | No `any` types in TypeScript examples | Yes — replace with proper types |
+| G6 | All markdown tables have consistent column counts (no mismatched `\|` separators) | Yes |
+| G7 | Minimum code examples met: 2 (`--quick`), 4 (default), 8 (`--deep`) | No — go back to Phase 4 for more content |
+| G8 | No `TODO`, `TBD`, `...`, or placeholder text anywhere | Yes — remove or fill in |
+| G9 | Quick Reference section contains at least one table | Yes — convert to table |
+| G10 | Error Handling section (if present) contains a table | Yes — convert to table |
+| G11 | File is between 80-500 lines. Under 80 = too sparse. Over 500 = split or trim | No — requires rewrite |
+| G12 | No duplicate sections (same heading appearing twice) | Yes — merge them |
+
+### 7.3 Improvement Pass
+
+After scoring, if any dimension scores below 7/10, make targeted improvements:
+
+- **Completeness < 7**: Identify missing sections. If content exists in your scraped data, add the section. If not, go back to Phase 3-4 for targeted research on the missing area.
+- **Accuracy < 7**: Cross-reference parameter tables against the original scraped content. Fix any discrepancies.
+- **Code Quality < 7**: Ensure every example has imports, is runnable, and handles the obvious error case. Add a real-world workflow example if missing.
+- **Trigger Coverage < 7**: Rewrite the `description` and `When to Use` section with more specific verbs and nouns from the API surface.
+- **Actionability < 7**: Ask: "Could an agent complete a common task using ONLY this skill file?" If not, add the missing information (usually setup steps or required configuration).
+- **Structure < 7**: Convert prose to tables. Add subsection headings. Ensure API Reference has parameter tables, not paragraphs.
+
+**After improvements, re-check all Hard Quality Gates before proceeding.**
+
+### 7.4 Report to User
+
+Report to the user:
+
+```
+Skill: {name} ({version})
+Path: ~/.claude/skills/{slug}/SKILL.md
+Language: {language}
+Type: {$LIB_TYPE}
+Lines: {line count}
+
+Quality scores:
+  Completeness:     {X}/10
+  Accuracy:         {X}/10
+  Code Quality:     {X}/10
+  Trigger Coverage: {X}/10
+  Actionability:    {X}/10
+  Structure:        {X}/10
+  Overall:          {average}/10
+
+Sources scraped: {count}
+  {list of URLs used, grouped by score}
+
+Coverage:
+  ✓ {areas covered}
+  ✗ {areas NOT covered — with reason}
+
+{If coverage gaps exist:}
+Tip: For more complete coverage, try:
+  /learn {topic} --deep          (scrapes 25 sources)
+  /learn ./path/to/local/docs    (best quality — direct from source)
+```
 
 ---
 

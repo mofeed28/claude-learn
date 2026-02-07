@@ -23,16 +23,18 @@ For each skill found:
 
 ### Step 3: Full Update (per stale skill)
 For each skill that needs updating:
-1. Extract the technology name and doc URLs from the Overview section
-2. Run full research (same as `/learn` Phase 3) to find latest docs
-3. Scrape the latest documentation
+1. Extract the technology name, `type`, and doc URLs from the Overview section
+2. Run full research (same as `/learn` Phase 3, Strategies A-G including sitemap discovery and link crawling) to find latest docs
+3. Scrape the latest documentation using `/learn` Phase 4 (URL queue with scoring, retry with backoff, deduplication)
 4. **Fetch changelog between versions:** If the version changed from `{old}` to `{new}`:
    - `WebSearch: "{name} changelog {old} to {new}"`
    - `WebSearch: "site:github.com {name} releases"`
+   - Try direct fetch: `WebFetch: https://raw.githubusercontent.com/{owner}/{repo}/main/CHANGELOG.md`
    - Extract breaking changes and new features between the two versions
 5. Merge new information into the existing skill using the merge strategy below
-6. Update frontmatter: `version`, `generated` date
+6. Update frontmatter: `version`, `generated` date, and `type` (add if missing)
 7. If changelog data was found, update or create the `## Migration Notes` section
+8. Run the quality gate checks from `/learn` Phase 7 (all 12 hard gates must pass)
 
 ### Step 4: Report
 Show a summary table:
@@ -63,7 +65,8 @@ From the existing skill, extract:
 
 ### Step 3: Full Research
 Run full research (same as `/learn` Phase 3) to find latest docs, including:
-- Strategy A-F from `/learn` (official docs, GitHub, practical usage, registry, changelog)
+- Strategies A-G from `/learn` (official docs, GitHub, practical usage, sitemap discovery, link crawling, registry, changelog)
+- Use the full Phase 4 pipeline (URL queue with scoring, retry with backoff, deduplication)
 - Focus on what's changed since the `generated` date
 
 ### Step 4: Fetch Changelog
