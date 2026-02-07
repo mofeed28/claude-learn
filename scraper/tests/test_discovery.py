@@ -129,3 +129,101 @@ class TestFindSitemapURLs:
         assert "https://docs.stripe.com/sitemap.xml" in candidates
         assert "https://docs.stripe.com/robots.txt" in candidates
         assert len(candidates) == 4
+
+
+class TestDiscoveryEdgeCases:
+    """Edge cases for discovery functions."""
+
+    def test_sitemap_with_whitespace_in_loc(self):
+        xml = """<urlset>
+            <url><loc>
+                https://example.com/docs/api
+            </loc></url>
+        </urlset>"""
+        urls = parse_sitemap_urls(xml)
+        assert len(urls) == 1
+        assert urls[0] == "https://example.com/docs/api"
+
+    def test_sitemap_case_insensitive_tags(self):
+        xml = """<urlset>
+            <URL><LOC>https://example.com/docs/api</LOC></URL>
+        </urlset>"""
+        urls = parse_sitemap_urls(xml)
+        assert len(urls) == 1
+
+    def test_robots_comments_ignored(self):
+        content = """
+# This is a comment
+User-agent: *
+Disallow: /admin/
+# Another comment
+Sitemap: https://example.com/sitemap.xml
+"""
+        sitemaps, disallowed = parse_robots_txt(content)
+        assert len(sitemaps) == 1
+        assert len(disallowed) == 1
+
+    def test_robots_non_universal_agent_ignored(self):
+        content = """
+User-agent: Googlebot
+Disallow: /google-only/
+
+User-agent: *
+Disallow: /private/
+"""
+        sitemaps, disallowed = parse_robots_txt(content)
+        # Should only include /private/ (from User-agent: *)
+        assert "/private/" in disallowed
+        assert "/google-only/" not in disallowed
+
+    def test_is_disallowed_exact_prefix(self):
+        assert is_disallowed("https://example.com/api/v1", ["/api/"]) is True
+        assert is_disallowed("https://example.com/api2/v1", ["/api/"]) is False
+
+    def test_is_disallowed_empty_rules(self):
+        assert is_disallowed("https://example.com/anything", []) is False
+
+    def test_filter_doc_urls_mixed(self):
+        urls = [
+            "https://example.com/docs/intro",
+            "https://example.com/blog/news",
+            "https://example.com/pricing",
+            "https://example.com/api/users",
+            "https://example.com/page.html",
+            "https://example.com/random-file.zip",
+        ]
+        result = filter_doc_urls(urls)
+        assert "https://example.com/docs/intro" in result
+        assert "https://example.com/api/users" in result
+        assert "https://example.com/page.html" in result
+        assert "https://example.com/blog/news" not in result
+        assert "https://example.com/pricing" not in result
+
+    def test_extract_doc_links_deduplicates(self):
+        html = """
+        <a href="/docs/api">Link 1</a>
+        <a href="/docs/api">Link 2</a>
+        <a href="/docs/api#section">Link 3</a>
+        """
+        links = extract_doc_links(html, "https://example.com")
+        api_links = [l for l in links if "api" in l]
+        assert len(api_links) == 1  # deduped
+
+    def test_extract_doc_links_skips_downloads(self):
+        html = """
+        <a href="/files/doc.zip">Download</a>
+        <a href="/images/logo.png">Logo</a>
+        <a href="/docs/guide">Guide</a>
+        """
+        links = extract_doc_links(html, "https://example.com")
+        assert not any(".zip" in l for l in links)
+        assert not any(".png" in l for l in links)
+        assert any("guide" in l for l in links)
+
+    def test_find_sitemap_uses_origin_only(self):
+        """Sitemap URLs should be at the origin, ignoring path."""
+        candidates = find_sitemap_urls("https://docs.stripe.com/api/v2/charges")
+        for url in candidates:
+            assert url.startswith("https://docs.stripe.com/")
+            # Should not include /api/v2/charges
+            assert "/api/" not in url
