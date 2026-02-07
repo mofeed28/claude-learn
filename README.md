@@ -358,6 +358,37 @@ All using Claude Code's built-in tools: `WebSearch`, `WebFetch`, `Read`, `Write`
 
 ---
 
+## Runtime Scraper (optional, recommended)
+
+For faster, cached, and more reliable scraping, install the Python runtime scraper:
+
+```bash
+cd claude-learn
+pip install -r requirements.txt
+```
+
+The `/learn` command automatically detects and uses the scraper when available. Benefits:
+
+| Feature | Without scraper | With scraper |
+|---------|----------------|-------------|
+| Fetching | Sequential WebFetch calls | Async parallel (5-8 concurrent) |
+| Caching | None (re-scrapes every run) | 6-hour file cache (instant repeats) |
+| Retry | Instructed, not enforced | Enforced exponential backoff (2s/4s/8s) |
+| Rate limiting | None | 0.5s per-domain throttle |
+| Deduplication | Content comparison in prompt | Jaccard similarity > 0.9 = auto-skip |
+
+The scraper is **completely optional** — `/learn` works fine without it using Claude's built-in WebSearch/WebFetch. The scraper just makes it faster and more reliable.
+
+```bash
+# Test it works
+python -m scraper "hono" --mode quick --urls https://hono.dev/docs
+
+# Run tests (64 tests)
+python -m pytest scraper/tests/ -v
+```
+
+---
+
 ## Limitations
 
 Being honest about what a free solution can't do:
