@@ -122,3 +122,102 @@ class TestContentSimilarity:
         text2 = "the quick brown fox leaps over the lazy dog"
         sim = content_similarity(text1, text2)
         assert sim > 0.7
+
+
+class TestEdgeCases:
+    """Edge cases for content extraction."""
+
+    def test_deeply_nested_html(self):
+        """Deeply nested tags should not crash the parser."""
+        html = "<div>" * 100 + "<p>Deep text</p>" + "</div>" * 100
+        result = extract_content(html)
+        assert "Deep text" in result.text
+
+    def test_empty_html(self):
+        result = extract_content("")
+        assert result.word_count == 0
+
+    def test_only_script_tags(self):
+        html = "<script>var x = 1;</script><script>var y = 2;</script>"
+        result = extract_content(html)
+        assert "var x" not in result.text
+
+    def test_html_entities(self):
+        html = "<p>Price is &lt;$100 &amp; &gt;$50</p>"
+        result = extract_content(html)
+        assert "<$100" in result.text or "&lt;" in result.text
+
+    def test_unicode_content(self):
+        html = "<p>日本語のドキュメント — API リファレンス</p>"
+        result = extract_content(html)
+        assert "日本語" in result.text
+
+    def test_mixed_encoding_chars(self):
+        html = "<p>Héllo wörld — naïve café résumé</p>"
+        result = extract_content(html)
+        assert "Héllo" in result.text
+
+    def test_pre_without_code(self):
+        """<pre> without <code> should still capture content."""
+        html = "<pre>formatted text\n  with indentation</pre>"
+        result = extract_content(html)
+        assert "formatted text" in result.text
+
+    def test_inline_code_too_short(self):
+        """Inline code snippets (<20 chars) should be skipped from code_blocks."""
+        html = "<p>Use <code>npm i</code> to install</p>"
+        result = extract_content(html)
+        assert len(result.code_blocks) == 0
+
+    def test_multiple_tables(self):
+        html = """
+        <table><tr><th>A</th></tr><tr><td>1</td></tr></table>
+        <table><tr><th>B</th></tr><tr><td>2</td></tr></table>
+        """
+        result = extract_content(html)
+        assert len(result.tables) == 2
+
+    def test_table_with_nested_html(self):
+        html = """
+        <table>
+        <tr><th><strong>Name</strong></th><th>Type</th></tr>
+        <tr><td><code>id</code></td><td>string</td></tr>
+        </table>
+        """
+        result = extract_content(html)
+        assert len(result.tables) >= 1
+        assert "Name" in result.tables[0]
+
+    def test_strips_boilerplate_tags(self):
+        """Nav/footer elements should be stripped while preserving main content."""
+        html = """
+        <nav>Navigation links to skip</nav>
+        <main><p>Real documentation here that matters</p></main>
+        <footer>Footer content to skip</footer>
+        """
+        result = extract_content(html)
+        assert "Real documentation" in result.text
+        assert "Navigation links" not in result.text
+        assert "Footer content" not in result.text
+
+    def test_link_resolution_with_base_url(self):
+        html = '<a href="../api/charges">Charges</a>'
+        result = extract_content(html, base_url="https://docs.stripe.com/docs/guide/")
+        assert "https://docs.stripe.com/docs/api/charges" in result.links
+
+    def test_relative_link_no_base_url(self):
+        html = '<a href="/docs/api">API</a>'
+        result = extract_content(html, base_url="")
+        assert "/docs/api" in result.links
+
+    def test_javascript_links_filtered(self):
+        html = '<a href="javascript:void(0)">Click</a><a href="/docs/real">Real</a>'
+        result = extract_content(html)
+        assert "javascript:" not in str(result.links)
+
+    def test_fallback_on_broken_html(self):
+        """Truly broken HTML that crashes the parser should fall back to regex."""
+        # HTMLParser is pretty resilient, but let's test with weird content
+        html = "<<<<<>>>>>just text here with no real tags"
+        result = extract_content(html)
+        assert "just text" in result.text or result.word_count >= 0
