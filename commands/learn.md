@@ -4,6 +4,62 @@ The user wants to learn about: **$ARGUMENTS**
 
 ---
 
+## Phase 0: Check for Runtime Scraper
+
+Before starting the pipeline, check if the Python runtime scraper is available:
+
+```
+Bash: python -c "import scraper" 2>/dev/null && echo "SCRAPER_AVAILABLE" || echo "SCRAPER_MISSING"
+```
+
+**If `SCRAPER_AVAILABLE`:** Use the runtime scraper for Phases 3-4. This gives you:
+- Real async concurrency (5-8 parallel fetches)
+- File-based caching (6-hour TTL — repeated runs are instant)
+- Automatic retry with exponential backoff (enforced, not just instructed)
+- Per-domain rate limiting (0.5s between requests)
+- Content deduplication (Jaccard similarity > 0.9 = skip)
+- Sitemap discovery and link crawling built-in
+
+Run it like this:
+```
+Bash: python -m scraper "$TOPIC" --mode {quick|default|deep} --urls {initial_urls_from_search...}
+```
+
+The scraper outputs JSON to stdout with structure:
+```json
+{
+  "topic": "stripe",
+  "mode": "default",
+  "pages": [
+    {
+      "url": "https://docs.stripe.com/api",
+      "title": "Stripe API Reference",
+      "text": "...",
+      "code_blocks": ["..."],
+      "headings": ["..."],
+      "tables": ["..."],
+      "word_count": 5000
+    }
+  ],
+  "stats": {
+    "urls_discovered": 45,
+    "urls_fetched": 12,
+    "urls_cached": 3,
+    "urls_failed": 2,
+    "pages_extracted": 10,
+    "total_time_seconds": 8.5
+  }
+}
+```
+
+Read the JSON output and use the `pages` array as your scraped content for Phase 6 generation. Skip Phases 3-4 entirely when using the runtime scraper — it handles research, fetching, caching, and dedup.
+
+After generation, include scraper stats in the Phase 7 report.
+
+**If `SCRAPER_MISSING`:** Fall back to the built-in WebSearch/WebFetch pipeline (Phases 3-4 as described below). The skill quality will be the same — the runtime scraper just adds caching, retry enforcement, and speed.
+
+---
+
 ## Phase 1: Parse Input
 
 Determine what the user is asking you to learn. Parse `$ARGUMENTS` into these components:
@@ -83,9 +139,32 @@ Store the detected language as `$LANGUAGE` for use in Phase 5.
 
 ---
 
+## Phase 2.5: Classify Library Type
+
+After detecting the language, classify the topic into one of these library types. This determines which sections to emphasize and how to structure examples.
+
+| Type | Signals | Example | Emphasis |
+|------|---------|---------|----------|
+| `api-client` | Wraps a REST/GraphQL API, needs API keys, has request/response patterns | Stripe SDK, Twilio, OpenAI | Auth setup, endpoint tables, request/response examples, error codes, rate limits, webhooks |
+| `framework` | Provides app structure, has routing/middleware/lifecycle, you build on top of it | Hono, Express, FastAPI, Rails | Routing, middleware, project structure, deployment, context objects, plugin ecosystem |
+| `ui-library` | Renders UI components, has component APIs, props/slots | React, Vue, Shadcn, Radix | Component props tables, composition patterns, styling, accessibility, state management |
+| `orm-db` | Database abstraction, has schema/query/migration patterns | Drizzle, Prisma, SQLAlchemy | Schema definition, query patterns, migrations, relations, transactions, raw queries |
+| `cli-tool` | Command-line interface, has subcommands/flags | esbuild, Vite, turbo | Command reference table, config file format, common flag combos, CI/CD usage |
+| `utility` | Helper functions, no app structure, import-and-use | Lodash, Zod, date-fns | Function signatures, chaining/composition, tree-shaking, type inference |
+| `platform` | Cloud service SDK, infra management | AWS SDK, Supabase, Firebase | Service-specific setup, IAM/auth, resource management, pricing gotchas |
+| `testing` | Test runner or assertion library | Vitest, pytest, Playwright | Test structure, matchers/assertions, mocking, fixtures, CI integration |
+
+**How to classify:** Use the first web search results and GitHub description to determine the type. If a topic spans multiple types (e.g., Supabase is both `platform` and `orm-db`), pick the **primary** type and note the secondary. Store as `$LIB_TYPE`.
+
+**If unsure**, default to `utility` — it has the most generic template and works for anything.
+
+---
+
 ## Phase 3: Multi-Strategy Research
 
 Run these search strategies **in parallel** where possible. The goal is to find the best sources, not all sources.
+
+**Before searching, build a URL queue.** As you discover URLs from search results, add them all to a running list. De-duplicate by normalized URL (strip trailing slashes, fragments, and tracking params like `utm_*`). Score each URL by source priority (see Phase 4) before fetching.
 
 ### Strategy A: Official Docs
 ```
@@ -99,52 +178,152 @@ WebSearch: "$TOPIC github repository README"
 WebSearch: "site:github.com $TOPIC"
 ```
 
+When you find the GitHub repo, also:
+1. Fetch the repo metadata: `gh api repos/{owner}/{repo}` to get `homepage` URL (this is often the docs site)
+2. Check for docs in the repo: `gh api repos/{owner}/{repo}/contents/docs` — queue any `.md` files found
+3. Check for a `docs` or `website` directory that might contain structured documentation
+
 ### Strategy C: Practical Usage
 ```
 WebSearch: "$TOPIC getting started tutorial examples"
 WebSearch: "$TOPIC cheat sheet quick reference"
 ```
 
-### Strategy D: Raw/Alternative Sources (fallback)
+### Strategy D: Sitemap & Link Discovery
+
+**This is a high-value strategy.** Before falling back to alternative sources, try to discover the full documentation structure:
+
+1. **Sitemap discovery** — Try fetching these URLs (in parallel) for the official docs domain:
+   ```
+   WebFetch: {docs_base_url}/sitemap.xml
+   WebFetch: {docs_base_url}/sitemap-0.xml
+   WebFetch: {docs_base_url}/sitemap_index.xml
+   ```
+   If a sitemap is found, parse it for all `<loc>` URLs. Filter to keep only documentation-relevant paths (containing `/docs/`, `/api/`, `/guide/`, `/reference/`, `/tutorial/`, `/getting-started/`). Add these to the URL queue — they are high-quality sources.
+
+2. **Docs index page crawling** — Fetch the main docs page and extract internal links from:
+   - Sidebar navigation (`<nav>`, `role="navigation"`, class names containing `sidebar`, `nav`, `menu`, `toc`)
+   - Table of contents sections
+   - "Next/Previous" pagination links
+   - Any links with paths matching `/docs/`, `/api/`, `/guide/`, `/reference/`
+
+   Add discovered internal doc links to the URL queue. This often reveals 10-50 pages that search alone would miss.
+
+3. **robots.txt check** — Fetch `{docs_base_url}/robots.txt` to find `Sitemap:` directives pointing to the sitemap URL. Also respect `Disallow` rules — skip paths that are disallowed.
+
+### Strategy E: Raw/Alternative Sources (fallback)
 If the official docs are JS-rendered SPAs that WebFetch can't scrape, try these alternatives in order:
 1. **GitHub raw README**: `https://raw.githubusercontent.com/{owner}/{repo}/main/README.md`
 2. **GitHub API**: Use Bash with `gh api repos/{owner}/{repo}/readme --jq .content | base64 -d` if gh CLI is available
 3. **npm/PyPI/crates.io pages**: These are usually scrapeable
 4. **Dev.to / blog posts**: Often have comprehensive API overviews
 5. **GitHub docs folder**: Fetch docs from `https://raw.githubusercontent.com/{owner}/{repo}/main/docs/` — try fetching key `.md` files (README.md, getting-started.md, api.md, guide.md, etc.)
-6. **Wayback Machine**: Try `https://web.archive.org/web/2024/{docs_url}` for JS-rendered sites that can't be scraped directly
+6. **Wayback Machine**: Try `https://web.archive.org/web/{docs_url}` for JS-rendered sites that can't be scraped directly
+7. **GitHub wiki**: Try `https://raw.githubusercontent.com/wiki/{owner}/{repo}/Home.md` — many projects keep detailed docs in their wiki
+8. **StackOverflow consolidated answers**: `WebSearch: "site:stackoverflow.com $TOPIC [tag] answers:1 score:10"` — high-scored answers often contain canonical usage patterns
 
-**Soft failure detection:** When fetching a page, check if the response is a soft failure:
+**Soft failure detection:** When fetching any page, check if the response is a soft failure:
 - Content is less than 500 characters
-- Content contains "sign in", "access denied", "log in to continue", "enable javascript"
-- Content is mostly navigation/boilerplate with no real documentation
+- Content contains "sign in", "access denied", "log in to continue", "enable javascript", "403", "404", "not found"
+- Content is mostly navigation/boilerplate with no real documentation (ratio of links to text > 3:1)
+- Content is identical or near-identical (>90% overlap) to an already-fetched page
 
 If a soft failure is detected, discard the result and move to the next source.
 
-### Strategy E: Package Registry
+### Strategy F: Package Registry
 Search the relevant package registry to get version info, README, and metadata:
 ```
 WebSearch: "site:npmjs.com $TOPIC"        (for JS/TS)
 WebSearch: "site:pypi.org $TOPIC"         (for Python)
 WebSearch: "site:crates.io $TOPIC"        (for Rust)
 WebSearch: "site:pkg.go.dev $TOPIC"       (for Go)
+WebSearch: "site:rubygems.org $TOPIC"     (for Ruby)
+WebSearch: "site:hex.pm $TOPIC"           (for Elixir)
 ```
 Pick the registry that matches the detected `$LANGUAGE`, or search npm + pypi as defaults.
 
 From registry pages, extract: **current version**, **publish date**, **weekly downloads**, **peer dependencies**.
 
-### Strategy F: Changelog / Migration
+### Strategy G: Changelog / Migration
 ```
 WebSearch: "$TOPIC changelog breaking changes"
 WebSearch: "site:github.com $TOPIC releases"
 ```
 From these results, extract: **recent breaking changes**, **deprecated APIs**, **migration guides between major versions**.
 
+Also try fetching directly:
+```
+WebFetch: https://raw.githubusercontent.com/{owner}/{repo}/main/CHANGELOG.md
+WebFetch: https://raw.githubusercontent.com/{owner}/{repo}/main/MIGRATION.md
+WebFetch: https://raw.githubusercontent.com/{owner}/{repo}/main/UPGRADING.md
+```
+
 ---
 
 ## Phase 4: Scrape & Extract
 
-From the best sources found, use WebFetch (or Read for local files) to extract:
+### 4.1 URL Queue Management
+
+Before scraping, process the URL queue built during Phase 3:
+
+1. **De-duplicate**: Normalize all URLs (lowercase domain, strip trailing `/`, remove fragments `#...`, remove tracking params `utm_*`, `ref=`, `source=`). Remove exact duplicates.
+2. **Score & prioritize** each URL on a 1-5 scale:
+
+| Score | Source Type | Example |
+|-------|-------------|---------|
+| 5 | Official API reference page | `docs.stripe.com/api/charges` |
+| 5 | Sitemap-discovered doc pages | Pages found via sitemap.xml |
+| 4 | Official guides / getting started | `docs.stripe.com/guides/...` |
+| 4 | GitHub README / docs folder `.md` files | `raw.githubusercontent.com/...` |
+| 3 | Package registry pages (npm, PyPI, etc.) | `npmjs.com/package/stripe` |
+| 3 | GitHub wiki pages | `github.com/.../wiki/...` |
+| 2 | Blog posts / tutorials (dev.to, medium) | `dev.to/...` |
+| 2 | StackOverflow answers | `stackoverflow.com/questions/...` |
+| 1 | Wayback Machine snapshots | `web.archive.org/...` |
+| 1 | Unrelated or generic pages | Anything not clearly about $TOPIC |
+
+3. **Sort** the queue by score (highest first). Within the same score, prefer shorter URL paths (closer to doc root = more important pages).
+4. **Cap the queue** based on depth mode:
+   - `--quick`: Fetch top 5 URLs
+   - default: Fetch top 12 URLs
+   - `--deep`: Fetch top 25 URLs
+
+### 4.2 Fetching with Retry & Backoff
+
+Use WebFetch (or Read for local files) to fetch pages from the sorted queue.
+
+**Retry strategy:**
+- On first failure (timeout, network error, 5xx status): wait **2 seconds**, then retry
+- On second failure: wait **4 seconds**, then retry
+- On third failure: **discard the URL** and move to the next one in the queue
+- Do NOT retry on 4xx errors (404, 403, 401) — these are permanent failures
+- Do NOT retry on soft failures (sign-in walls, empty pages) — discard immediately
+
+**Parallel fetching:**
+- Fetch in batches of **5 URLs at a time** (use parallel WebFetch calls)
+- After each batch completes, check if you have enough content for the current depth mode. If you already have comprehensive coverage of the API surface, you can stop early — don't fetch more than needed
+- Between batches, briefly assess what content areas are still missing (e.g., "have API reference but no error handling docs") and prioritize remaining URLs that are likely to fill those gaps
+
+### 4.3 Link Crawling (Depth-1)
+
+After fetching each page, scan the content for internal documentation links — links to other pages on the **same domain** that point to doc content. Look for:
+
+- Links in navigation/sidebar sections
+- "See also", "Related", "Next steps" links
+- Links to sub-pages of API reference (e.g., `/api/charges/create` linked from `/api/charges`)
+- Links matching patterns: `/docs/`, `/api/`, `/guide/`, `/reference/`, `/tutorial/`
+
+**Rules for link crawling:**
+- Only crawl **one level deep** (don't follow links from crawled pages)
+- Only follow links on the **same domain** as the source page
+- Add discovered links to the URL queue with a score of 4 (they're from official docs)
+- Still respect the URL cap for the current depth mode
+- Skip links that match already-fetched URLs (de-duplicate before fetching)
+- Skip anchor-only links (`#section`), query-only variations, and non-doc paths (`/blog/`, `/pricing/`, `/login/`, `/careers/`)
+
+### 4.4 Content Extraction
+
+From fetched pages, extract:
 
 - **Architecture & core concepts** — what is it, how does it work
 - **API surface** — endpoints, methods, functions, classes, hooks
@@ -158,13 +337,28 @@ From the best sources found, use WebFetch (or Read for local files) to extract:
 - **Deprecated patterns** — what NOT to use, with replacement APIs and the version they were deprecated in
 - **Testing patterns** — how to mock/test code using this library, test utilities provided
 
-**Scraping rules:**
-- Fetch pages in parallel (3-5 at a time) for speed
-- If a page fails, don't retry more than once — move to the next source
-- Prioritize: Official docs > GitHub README > API reference > Registry pages > Blog posts
-- For large docs, focus on the core API and most-used features. A skill that covers 80% well is better than 100% poorly.
-- In `--quick` mode, stop after fetching 3-5 of the best sources
-- In `--deep` mode, fetch up to 15 sources and cover edge cases
+### 4.5 Content Deduplication
+
+As you extract content, track what information you've already collected. Before adding content from a new page:
+
+1. **Skip duplicate sections** — if a page covers the exact same API methods/endpoints you already have with no new parameters or examples, skip it
+2. **Merge complementary info** — if a new page adds parameters, examples, or edge cases to an API you already documented, merge the new details into your existing notes
+3. **Prefer official sources** — if two pages conflict (different parameter names, different defaults), prefer the higher-scored source
+4. **Track coverage** — maintain a mental checklist of what you've covered vs. what's still missing:
+   - [ ] Core API methods/functions
+   - [ ] Installation & setup
+   - [ ] Authentication/configuration
+   - [ ] Error codes & handling
+   - [ ] Code examples (at least 3)
+   - [ ] TypeScript types (if applicable)
+   - [ ] Common patterns/workflows
+   - [ ] Deprecations & migration notes
+
+### 4.6 Scraping Rules Summary
+
+- For large docs, focus on the core API and most-used features. A skill that covers 80% well is better than 100% poorly
+- If the URL queue runs dry before you have enough content, go back to Phase 3 and run additional targeted searches for the missing areas
+- If a whole docs site is unscrappable (JS SPA, auth wall), note this in the Phase 7 report and suggest the user provide local docs via `/learn ./path/to/docs`
 
 ---
 
@@ -190,28 +384,52 @@ Derive the slug: lowercase the topic name, replace spaces and special characters
 
 Create the directory and file at: `~/.claude/skills/{slug}/SKILL.md`
 
-### Required Structure
+### 6.1 Frontmatter
 
 ```markdown
 ---
 name: {slug}
-description: {A specific, trigger-word-rich sentence. This is what Claude uses to decide when to activate the skill. Be precise. Bad: "Helps with Stripe". Good: "Stripe payment processing API. Use when integrating payments, creating charges, managing subscriptions, handling webhooks, or working with Stripe Elements/Checkout."}
+description: {A specific, trigger-word-rich sentence. 20+ words. This is what Claude uses to decide when to activate the skill. Be precise about WHAT it does and WHEN to use it. Bad: "Helps with Stripe". Good: "Stripe payment processing API. Use when integrating payments, creating charges, managing subscriptions, handling webhooks, or working with Stripe Elements/Checkout."}
 version: "{current stable version, e.g. 4.2.1}"
 generated: "{YYYY-MM-DD}"
 language: {detected language, e.g. typescript, python, rust — or "multi" if multi-language}
+type: {$LIB_TYPE from Phase 2.5, e.g. framework, api-client, utility}
 tags: [{3-8 relevant tags, e.g. payments, api, webhooks, sdk}]
 ---
+```
 
+### 6.2 Type-Aware Section Emphasis
+
+Based on `$LIB_TYPE`, adjust which sections get the most depth and detail:
+
+| Section | `api-client` | `framework` | `ui-library` | `orm-db` | `cli-tool` | `utility` | `platform` | `testing` |
+|---------|-------------|-------------|--------------|---------|-----------|----------|-----------|----------|
+| Quick Reference | endpoints table | routing table | component list | query patterns | command table | function list | services table | assertion list |
+| Installation & Setup | + auth/API keys | + project scaffold | + peer deps | + DB connection | + global install | minimal | + IAM/credentials | + config file |
+| Core Concepts | request lifecycle | middleware chain | component model | schema→query flow | config cascade | composition | service model | test lifecycle |
+| API Reference | **★ primary** | route handlers | **★ props tables** | **★ query builder** | **★ flags/options** | **★ primary** | **★ primary** | matchers |
+| Common Patterns | CRUD + webhooks | **★ primary** | **★ composition** | migrations + joins | **★ recipes** | chaining | **★ primary** | **★ primary** |
+| Error Handling | **★ error codes** | middleware errors | prop warnings | query/connection errors | exit codes | validation errors | **★ service errors** | test failures |
+| TypeScript | response types | context typing | **★ prop types** | schema types | — | **★ generics** | SDK types | type matchers |
+| Testing | mock API calls | **★ test server** | component tests | **★ test DB** | snapshot tests | unit tests | mock services | — |
+
+**★ = this is the highest-value section for this library type. Spend the most effort here. This section should be the longest and most detailed.**
+
+### 6.3 Required Structure
+
+```markdown
 # {Technology Name} Skill
 
 ## When to Use This Skill
 
 Use this skill when the user needs to:
 - {5-10 specific trigger scenarios as bullet points}
+- {Include VERBS that an agent would match: "create", "configure", "debug", "migrate", "deploy", etc.}
+- {Include NOUNS specific to this technology: "webhook", "middleware", "schema", "route", etc.}
 
 ## Overview
 
-{2-3 sentences: what it is, what problem it solves, key characteristics}
+{2-3 sentences: what it is, what problem it solves, key characteristics. Mention the runtime/ecosystem.}
 
 **Key links:**
 - Docs: {url}
@@ -220,60 +438,105 @@ Use this skill when the user needs to:
 
 ## Prerequisites
 
-{Only include if there are specific requirements. Omit if standard.}
 - Runtime: {e.g. Node.js >= 18, Python >= 3.9}
 - Peer dependencies: {if any}
 - Related skills: {if other installed skills pair with this one}
 
 ## Quick Reference
 
-{The most important info at a glance. Use a table for API endpoints, CLI commands, or method signatures. This section should answer "what's the most common thing I need to do?" in 10 seconds.}
+{The most important info at a glance. MUST be a table. This section should answer "what's the most common thing I need to do?" in 10 seconds.}
+
+{For api-client: endpoint → method → description table}
+{For framework: HTTP method → route syntax → handler example table}
+{For ui-library: component → key props → usage table}
+{For orm-db: operation → syntax → description table}
+{For cli-tool: command → flags → description table}
+{For utility: function → signature → description table}
+{For platform: service → key method → description table}
+{For testing: assertion → syntax → description table}
 
 ## Installation & Setup
 
 {How to install, configure, authenticate. Include actual commands.}
+{For api-client/platform: MUST include API key setup, environment variable configuration}
+{For framework: include both "new project" and "add to existing" paths}
+{For orm-db: include database connection setup}
 
 ## Core Concepts
 
-{Key mental models the agent needs. Keep it brief — bullet points or short paragraphs, not essays.}
+{Key mental models the agent needs. Keep it brief — bullet points or short paragraphs.}
+{Explain the 3-5 things someone MUST understand before using this effectively.}
+{Use the mental model that matches the library type — see Section Emphasis table above.}
 
 ## API Reference
 
-{The meat of the skill. Detailed parameter tables, method signatures, endpoints.}
+{The meat of the skill. Group by logical function, not alphabetically.}
 
-### {Endpoint/Method Group 1}
+### {Method/Endpoint Group 1}
 
-{Description}
+{One-line description}
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| ... | ... | ... | ... | ... |
+
+**Returns:** `{ReturnType}` — {what it returns}
 
 **Example:**
 ```{language}
 import { ... } from '...';
-// real working code example with imports
+
+// Complete, runnable example — not a fragment
 ```
+
+**Gotcha:** {One-line warning about a common mistake, if applicable}
+
+### {Method/Endpoint Group 2}
+{...repeat for each group...}
 
 ## Common Patterns
 
-{3-5 typical usage patterns with complete, working code examples}
+{3-5 patterns, each with a descriptive ### heading and complete code example.}
+{Every pattern must solve a REAL task, not demonstrate syntax.}
+
+### {Pattern 1: Descriptive Name}
+```{language}
+// Full working example with imports, error handling, and comments on non-obvious lines
+```
+
+### {Pattern 2: Descriptive Name}
+```{language}
+// ...
+```
 
 ## Error Handling
 
-{Common errors, what causes them, how to fix them}
+{Common errors, what causes them, how to fix them. MUST be a table.}
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| ... | ... | ... |
+| {Error name/code} | {What triggers it} | {How to resolve — be specific} |
+
+{For api-client: include HTTP status codes and API-specific error objects}
+{For orm-db: include connection errors, query errors, migration errors}
+{For framework: include middleware errors, routing errors}
 
 ## TypeScript Integration
 
-{Only include for JS/TS libraries. Key types, generics, inference patterns.}
+{Only include for JS/TS libraries.}
+{Key types, generics, inference patterns. Show the types that developers struggle with most.}
+
+```typescript
+// Type examples that are genuinely useful, not just "here's the type definition"
+```
 
 ## Testing
 
-{How to mock/test code using this library. Test utilities provided.}
+{How to mock/test code using this library.}
+{Include test setup, mocking strategy, and at least one complete test example.}
+
+```{language}
+// Complete test example with imports, setup, assertion
+```
 
 ## Deprecated / Avoid
 
@@ -281,7 +544,10 @@ import { ... } from '...';
 
 | Deprecated API | Replacement | Since Version |
 |----------------|-------------|---------------|
-| ... | ... | ... |
+| {old way} | {new way — with example} | {version} |
+
+**Common mistakes to avoid:**
+- {Mistake 1} — {why it's wrong and what to do instead}
 
 ## Migration Notes
 
@@ -293,7 +559,7 @@ import { ... } from '...';
 
 ## Important Rules
 
-{Numbered list of critical things to remember}
+{Numbered list of critical things to remember. These should be things that cause BUGS or WASTED TIME if forgotten.}
 
 1. **{Rule}** — {explanation}
 2. ...
@@ -305,15 +571,15 @@ import { ... } from '...';
 - `{skill-name}` — {how it relates}
 ```
 
-### Section Rules by Depth
+### 6.4 Section Rules by Depth
 
 | Section | `--quick` | default | `--deep` |
 |---------|-----------|---------|----------|
 | When to Use | 3-5 bullets | 5-10 bullets | 5-10 bullets |
 | Overview | 1-2 sentences | 2-3 sentences | 3-5 sentences |
 | Prerequisites | omit | include if relevant | always include |
-| Quick Reference | include | include | include |
-| Installation & Setup | include | include | include |
+| Quick Reference | include (1 table) | include (1-2 tables) | include (full tables) |
+| Installation & Setup | basic install | install + config | install + config + deploy |
 | Core Concepts | 3-5 bullets | full section | full + advanced |
 | API Reference | top 5-10 APIs | core APIs | full API surface |
 | Common Patterns | 2-3 patterns | 3-5 patterns | 5-10 patterns |
@@ -325,65 +591,206 @@ import { ... } from '...';
 | Important Rules | 3-5 rules | 5-10 rules | 10+ rules |
 | Related Skills | omit | include | include |
 
-### Quality Rules
+### 6.5 Quality Rules
 
+**Content rules:**
 - **Tables over prose** for anything with parameters, options, or codes
-- **Real code examples** — never pseudocode, never `// do something here`
+- **Real code examples** — never pseudocode, never `// do something here`. Every example must be copy-pasteable.
 - **No placeholder sections** — if you don't have info for a section, omit it entirely rather than writing "TODO" or "See docs"
 - **No real API keys** — always use `YOUR_API_KEY`, `YOUR_SECRET`, etc.
-- **Case-sensitive names** — match the exact casing from official docs
-- **Include imports** in every code example — agents need complete, copy-pasteable code
+- **Case-sensitive names** — match the exact casing from official docs (e.g., `useState` not `usestate`)
+- **Include imports** in every code example — agents need complete, self-contained code
 - **Language-specific examples** — all code examples must be in `$LANGUAGE`. If multi-language, use the detected project language, falling back to the library's primary language
-- **Concise** — if a section would exceed 50 lines, break it into subsections or trim to the most important parts
 - **All code blocks must have a language specifier** (```typescript, ```python, etc. — never bare ```)
 - **No `any` types in TypeScript examples** — use proper types, generics, or `unknown` if truly needed
 
+**Structural rules:**
+- **Concise** — if a section would exceed 50 lines, break it into subsections or trim to the most important parts
+- **Every API Reference entry needs:** parameter table + return type + example + (optional) gotcha
+- **Every Common Pattern needs:** descriptive heading + complete code example + (optional) explanation
+- **Error Handling must be a table** — no prose-only error sections
+- **Quick Reference must be a table** — this is the "cheat sheet" section
+- **Group API Reference by function**, not alphabetically — group "read" methods together, "write" methods together, etc.
+
+**Code example rules:**
+- Minimum **4 code examples** in default mode, **2** in `--quick`, **8** in `--deep`
+- Each example must include **all imports** needed to run it
+- Each example must handle **the most common error case** (try/catch or error callback)
+- At least one example must show a **real-world workflow** (not just "hello world")
+- At least one example must show **error handling** in practice
+- For `api-client` type: at least one example must show **authentication setup**
+- For `framework` type: at least one example must show **middleware usage**
+- For `orm-db` type: at least one example must show a **multi-step transaction or join**
+
 ---
 
-## Phase 7: Verify & Report
+## Phase 7: Self-Critique & Quality Gate
 
-After writing the file:
+After writing the file, **read it back** with the Read tool and run it through a rigorous quality check. This is the most important phase — a bad skill file is worse than no skill file, because it teaches an agent wrong patterns.
 
-1. Read it back with the Read tool
-2. Verify:
-   - Frontmatter has `name`, `description`, `version`, `generated`, `language`, and `tags`
-   - Description contains specific trigger words (not generic) and is at least 20 words
-   - All code blocks have a language specifier (no bare ```)
-   - Every code example includes import statements
-   - No `any` types in TypeScript examples
-   - All markdown tables have consistent column counts (no mismatched `|` separators)
-   - At least 3 code examples exist (at least 2 in `--quick` mode)
-   - No `TODO`, `TBD`, `...`, or placeholder text remains
-   - Tables are properly formatted
-   - File is between 50-500 lines (warn if outside this range — under 50 means too sparse, over 500 means consider splitting)
-3. Fix any issues found during verification before reporting
-4. Report to the user:
-   - Skill path: `~/.claude/skills/{slug}/SKILL.md`
-   - Version detected: `{version}`
-   - Language: `{language}`
-   - Sources used (list the URLs you successfully scraped)
-   - Coverage assessment: what % of the API/docs you covered
-   - Anything you couldn't find or that needs manual additions
-   - If sources were limited, suggest: "If you have local docs or an API spec file, run `/learn path/to/file` for a more complete skill"
+### 7.1 Quality Rubric (score each 0-10)
+
+Score the generated skill on each dimension:
+
+| Dimension | What to check | 0 (fail) | 5 (passable) | 10 (excellent) |
+|-----------|--------------|----------|--------------|-----------------|
+| **Completeness** | Are all applicable sections present and filled? | Missing 3+ sections | All sections present, some thin | All sections thorough and detailed |
+| **Accuracy** | Do parameter names, types, and defaults match official docs? | Multiple wrong params | Mostly correct, minor gaps | Every param verified against source |
+| **Code Quality** | Are examples runnable, with imports, error handling? | Missing imports, pseudocode | Imports present, basic examples | Production-grade examples with edge cases |
+| **Trigger Coverage** | Would an agent find this skill when it's needed? | Generic description | Good keywords | Specific verbs + nouns covering all use cases |
+| **Actionability** | Can an agent USE this without reading external docs? | Needs external docs for basics | Can handle common tasks | Can handle complex tasks independently |
+| **Structure** | Tables vs prose, section organization, scanability | Wall of text | Some tables, okay structure | Well-organized tables, clear hierarchy |
+
+### 7.2 Hard Quality Gates
+
+These are **non-negotiable**. If any gate fails, fix the issue before proceeding.
+
+| Gate | Check | Auto-fix? |
+|------|-------|-----------|
+| G1 | Frontmatter has ALL fields: `name`, `description`, `version`, `generated`, `language`, `type`, `tags` | Yes |
+| G2 | `description` is 20+ words and contains specific trigger keywords (not generic) | Yes — rewrite it |
+| G3 | All code blocks have a language specifier (no bare ```) | Yes |
+| G4 | Every code example includes import/require statements | Yes — add imports |
+| G5 | No `any` types in TypeScript examples | Yes — replace with proper types |
+| G6 | All markdown tables have consistent column counts (no mismatched `\|` separators) | Yes |
+| G7 | Minimum code examples met: 2 (`--quick`), 4 (default), 8 (`--deep`) | No — go back to Phase 4 for more content |
+| G8 | No `TODO`, `TBD`, `...`, or placeholder text anywhere | Yes — remove or fill in |
+| G9 | Quick Reference section contains at least one table | Yes — convert to table |
+| G10 | Error Handling section (if present) contains a table | Yes — convert to table |
+| G11 | File is between 80-500 lines. Under 80 = too sparse. Over 500 = split or trim | No — requires rewrite |
+| G12 | No duplicate sections (same heading appearing twice) | Yes — merge them |
+
+### 7.3 Improvement Pass
+
+After scoring, if any dimension scores below 7/10, make targeted improvements:
+
+- **Completeness < 7**: Identify missing sections. If content exists in your scraped data, add the section. If not, go back to Phase 3-4 for targeted research on the missing area.
+- **Accuracy < 7**: Cross-reference parameter tables against the original scraped content. Fix any discrepancies.
+- **Code Quality < 7**: Ensure every example has imports, is runnable, and handles the obvious error case. Add a real-world workflow example if missing.
+- **Trigger Coverage < 7**: Rewrite the `description` and `When to Use` section with more specific verbs and nouns from the API surface.
+- **Actionability < 7**: Ask: "Could an agent complete a common task using ONLY this skill file?" If not, add the missing information (usually setup steps or required configuration).
+- **Structure < 7**: Convert prose to tables. Add subsection headings. Ensure API Reference has parameter tables, not paragraphs.
+
+**After improvements, re-check all Hard Quality Gates before proceeding.**
+
+### 7.4 Report to User
+
+Report to the user:
+
+```
+Skill: {name} ({version})
+Path: ~/.claude/skills/{slug}/SKILL.md
+Language: {language}
+Type: {$LIB_TYPE}
+Lines: {line count}
+
+Quality scores:
+  Completeness:     {X}/10
+  Accuracy:         {X}/10
+  Code Quality:     {X}/10
+  Trigger Coverage: {X}/10
+  Actionability:    {X}/10
+  Structure:        {X}/10
+  Overall:          {average}/10
+
+Sources scraped: {count}
+  {list of URLs used, grouped by score}
+
+Coverage:
+  ✓ {areas covered}
+  ✗ {areas NOT covered — with reason}
+
+{If coverage gaps exist:}
+Tip: For more complete coverage, try:
+  /learn {topic} --deep          (scrapes 25 sources)
+  /learn ./path/to/local/docs    (best quality — direct from source)
+```
 
 ---
 
 ## Special Modes
 
 ### Update mode
-If the user runs `/learn {topic}` and the skill already exists, you are updating it. Merge new information with existing content. Don't lose existing customizations. Preserve any lines or sections marked with `<!-- user -->`.
+If the user runs `/learn {topic}` and the skill already exists, you are updating it:
+1. Read the existing skill first
+2. Preserve all `<!-- user -->` marked lines and custom sections
+3. Merge new content with existing content — don't overwrite blindly
+4. Update frontmatter (`version`, `generated`, add `type` if missing)
+5. Keep the existing section order if it differs from template
+6. After merge, run all Phase 7 quality gates on the result
+7. In the report, show what changed: added sections, updated sections, preserved customizations
 
 ### Focused mode
-If the user uses colon syntax like `/learn react:hooks` or `/learn stripe:webhooks`, generate a skill focused specifically on that subtopic, not the entire technology.
+If the user uses colon syntax like `/learn react:hooks` or `/learn stripe:webhooks`:
+1. The part before `:` is the technology, the part after is the subtopic
+2. Classify the library type based on the parent technology, not the subtopic
+3. All web searches should include both: `"react hooks"` and `"react hooks API"`
+4. The skill slug uses a hyphen: `react:hooks` → `react-hooks`
+5. The skill should be self-contained — include enough context about the parent technology that an agent doesn't need the parent skill
+6. Include: how hooks relate to the broader React model, installation (if different), all hook APIs, and patterns specific to this subtopic
+7. The `description` field should reference both the parent and subtopic: `"React Hooks API. Use when managing state with useState, side effects with useEffect, context with useContext, refs with useRef, or building custom hooks."`
 
 ### Local file mode
-If the user passes a file path like `/learn ./docs/api.yaml` or `/learn C:\specs\openapi.json`, read the file directly. This produces the best quality skills because you have the raw source. Support these formats:
-- Markdown (.md)
-- API Blueprint (.apib)
-- OpenAPI/Swagger (.yaml, .yml, .json)
-- Plain text (.txt)
-- PDF (.pdf)
-- Any other text-based format
+If the user passes a file path like `/learn ./docs/api.yaml` or `/learn C:\specs\openapi.json`, read the file directly. This produces the best quality skills because you have the raw source.
+
+**Supported formats:**
+| Format | Extensions | How to process |
+|--------|-----------|---------------|
+| Markdown | `.md` | Read directly, extract sections |
+| API Blueprint | `.apib` | Parse resource groups, actions, parameters |
+| OpenAPI/Swagger | `.yaml`, `.yml`, `.json` | Parse paths, schemas, parameters, responses |
+| PDF | `.pdf` | Read with pages parameter for large PDFs |
+| Plain text | `.txt` | Read directly, infer structure |
+
+**For OpenAPI files:** Extract endpoints, parameters, request/response schemas, error codes, and authentication directly from the spec. This is the richest possible input — every parameter has a type, required status, and description already defined. Generate the most complete API Reference section possible from this data.
+
+**For large files (500+ lines):** Read in chunks. Focus on the API surface (endpoints, functions, classes) first, then fill in examples and patterns.
+
+After processing the local file, still run a quick web search (`"$TOPIC official documentation"`) to find the docs URL, GitHub repo, version info, and any patterns not covered in the file.
 
 ### GitHub URL mode
-If the user passes a GitHub URL like `/learn https://github.com/honojs/hono`, extract the owner/repo, fetch the README, metadata, and docs folder, then supplement with web search. This often produces better results than a plain topic name because you get the exact source.
+If the user passes a GitHub URL like `/learn https://github.com/honojs/hono`:
+1. Extract `{owner}` and `{repo}` from the URL
+2. Fetch in parallel:
+   - README: `https://raw.githubusercontent.com/{owner}/{repo}/main/README.md` (try `master` if fails)
+   - Metadata: `gh api repos/{owner}/{repo}` — get description, homepage, language, stars, topics
+   - Docs folder: `gh api repos/{owner}/{repo}/contents/docs` — fetch all `.md` files found
+   - Package info: Check `package.json` / `pyproject.toml` / `Cargo.toml` in the repo root for version
+3. Use the `homepage` field from metadata as the docs URL — add it to the URL queue for Phase 3
+4. Use the `topics` field from metadata to help classify the library type
+5. Supplement with web search using the repo name as the topic
+
+---
+
+## Error Recovery
+
+If the pipeline encounters problems, follow these recovery strategies:
+
+### No search results found
+- Try alternate names: `"stripe-node"` instead of `"stripe"`, or `"expressjs"` instead of `"express"`
+- Try broader queries: `"$TOPIC library"`, `"$TOPIC npm"`, `"$TOPIC python package"`
+- If still nothing, report to the user and suggest providing a local file or URL
+
+### All pages fail to scrape (JS SPA docs)
+- Exhaust ALL fallback sources from Strategy E (GitHub raw, wiki, npm, Wayback, StackOverflow)
+- Try fetching the GitHub repo directly (extract owner/repo from search results)
+- If you get at least a README and npm/PyPI page, proceed with generation — note reduced coverage in the report
+- If truly nothing scraped, report the failure and suggest: `/learn ./path/to/local/docs`
+
+### Insufficient content for quality gates
+- If the skill would fail G7 (minimum code examples) or G11 (minimum 80 lines):
+  - Go back to Phase 3 and run targeted searches for the missing content areas
+  - Try different search queries: `"$TOPIC examples"`, `"$TOPIC tutorial"`, `"$TOPIC cookbook"`
+  - If still insufficient after second research pass, generate the best skill possible and include a warning in the report: "This skill has limited coverage. For a more complete skill, try `/learn $TOPIC --deep` or provide local docs."
+- Never generate an empty or stub skill — either produce something useful or report failure
+
+### Version not detected
+- Default to `"unknown"` in frontmatter — never guess
+- Note in the report: "Version could not be detected from package registries"
+- The skill is still usable without a version — staleness detection will flag it for update later
+
+### Duplicate/conflicting information from sources
+- Always prefer higher-scored sources (official docs > blog posts)
+- For parameter names/types: trust the official API reference over tutorials
+- For code patterns: trust recently-dated sources over older ones
+- If genuinely conflicting (e.g., two official docs disagree), include both and note the conflict

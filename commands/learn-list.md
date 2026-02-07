@@ -20,7 +20,13 @@ For each skill found, read the frontmatter to extract:
 - `version` — the library version when the skill was generated (may be missing in old skills)
 - `generated` — the date the skill was generated/last updated (may be missing in old skills)
 - `language` — the target language (may be missing in old skills)
+- `type` — library type: api-client, framework, ui-library, orm-db, cli-tool, utility, platform, testing (may be missing in old skills)
 - `tags` — relevant tags (may be missing in old skills)
+
+Also count:
+- Total lines in the file
+- Number of code blocks (count occurrences of ```)
+- Number of tables (count lines starting with `|`)
 
 ### Step 3: Apply Filters
 
@@ -29,6 +35,7 @@ If `$ARGUMENTS` is not empty, filter the skills:
 - Match against `tags` (partial match, case-insensitive)
 - Match against `description` (partial match, case-insensitive)
 - Match against `language` (exact match, case-insensitive)
+- Match against `type` (exact match, case-insensitive)
 
 Show only skills that match at least one of the above. If no skills match, report "No skills matching '{$ARGUMENTS}' found" and show the full list instead.
 
@@ -39,39 +46,57 @@ For each skill, determine its freshness:
 - **Stale** — `generated` date is more than 60 days ago, or `generated` field is missing
 - Mark stale skills with a warning indicator
 
-### Step 5: Present Results
+### Step 5: Quick Quality Check
+
+For each skill, run a lightweight quality assessment:
+
+- **Lines**: count total lines
+- **Code examples**: count code blocks (pairs of ```)
+- **Tables**: count table rows (lines starting with `|`)
+- **Has imports**: check if at least one code block contains `import` or `require`
+
+Assign a quality tier:
+- **A** — 150+ lines, 4+ code examples, 3+ tables, has imports
+- **B** — 80-149 lines, 2+ code examples, 1+ tables
+- **C** — Under 80 lines, or fewer than 2 code examples, or no tables
+
+### Step 6: Present Results
 
 Show a rich table:
 
 ```
 Installed Skills (X total):
 
-| # | Skill | Version | Language | Generated | Status | Description |
-|---|-------|---------|----------|-----------|--------|-------------|
-| 1 | stripe | 15.0.0 | typescript | 2025-01-15 | Fresh | Stripe payment processing API... |
-| 2 | hono | 4.0.0 | typescript | 2024-10-01 | Stale | Lightweight web framework for... |
-| 3 | xrpl | 3.1.0 | multi | 2025-01-10 | Fresh | XRP Ledger blockchain develop... |
-| 4 | drizzle-orm | — | — | — | Stale | TypeScript ORM for SQL databa... |
+| # | Skill | Type | Version | Lang | Generated | Status | Grade | Description |
+|---|-------|------|---------|------|-----------|--------|-------|-------------|
+| 1 | stripe | api-client | 15.0.0 | ts | 2025-01-15 | Fresh | A | Stripe payment processing API... |
+| 2 | hono | framework | 4.0.0 | ts | 2024-10-01 | Stale | B | Lightweight web framework for... |
+| 3 | xrpl | platform | 3.1.0 | multi | 2025-01-10 | Fresh | A | XRP Ledger blockchain develop... |
+| 4 | drizzle-orm | orm-db | — | — | — | Stale | C | TypeScript ORM for SQL databa... |
 ```
 
 **Column rules:**
+- `Type`: show `type` from frontmatter, or `—` if missing
 - `Version`: show the version from frontmatter, or `—` if missing
-- `Language`: show the language from frontmatter, or `—` if missing
+- `Lang`: show abbreviated language (`typescript` → `ts`, `python` → `py`, `javascript` → `js`, `rust` → `rs`), or `—` if missing
 - `Generated`: show the date from frontmatter, or `—` if missing
 - `Status`: show `Fresh` or `Stale` based on staleness detection. Use `Stale` if the date is missing
-- `Description`: truncate to ~50 characters, add `...` if truncated
+- `Grade`: show `A`, `B`, or `C` based on quality tier
+- `Description`: truncate to ~40 characters, add `...` if truncated
 
-### Step 6: Show Summary
+### Step 7: Show Summary
 
 After the table, show:
 
 ```
 X skills installed, Y fresh, Z stale
+Quality: X grade A, Y grade B, Z grade C
 
+Grade C skills can be improved with /learn {name} --deep
 Stale skills can be refreshed with /learn-update
 ```
 
-### Step 7: Suggest Commands
+### Step 8: Suggest Commands
 
 ```
 Commands:
@@ -80,8 +105,10 @@ Commands:
   /learn {topic} --deep    — exhaustive deep-dive version
   /learn-update            — refresh all stale skills
   /learn-update {name}     — refresh a specific skill
-  /learn-list {filter}     — filter by name, tag, or language
+  /learn-list {filter}     — filter by name, tag, type, or language
   /learn-delete {name}     — delete a skill
+  /learn-audit             — run quality checks on all skills
+  /learn-audit {name}      — run quality check on one skill
   /learn {topic}:{sub}     — learn a focused subtopic
   /learn ./path/to/file    — learn from a local file
   /learn https://github.com/owner/repo — learn from GitHub repo

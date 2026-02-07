@@ -21,7 +21,7 @@ Claude Code agents are powerful, but they don't know every library or API out of
 
 - **No API keys** — uses Claude Code's built-in WebSearch and WebFetch
 - **No subscriptions** — completely free
-- **No setup** — copy 4 files and restart
+- **No setup** — copy 5 files and restart
 
 ---
 
@@ -29,7 +29,7 @@ Claude Code agents are powerful, but they don't know every library or API out of
 
 ### Option 1: Quick copy (recommended)
 
-Copy the 4 files from `commands/` into your `~/.claude/commands/` directory:
+Copy the 5 command files from `commands/` into your `~/.claude/commands/` directory:
 
 ```bash
 # macOS / Linux
@@ -56,6 +56,7 @@ cp commands/learn.md ~/.claude/commands/
 cp commands/learn-update.md ~/.claude/commands/
 cp commands/learn-list.md ~/.claude/commands/
 cp commands/learn-delete.md ~/.claude/commands/
+cp commands/learn-audit.md ~/.claude/commands/
 ```
 
 Then **restart Claude Code**.
@@ -80,7 +81,7 @@ Your agent now knows Stripe — endpoints, parameters, auth, error codes, code e
 /learn stripe --quick
 ```
 
-Generates a condensed ~3-page cheat sheet with the essentials: quick reference tables, top APIs, and a few code examples. Great for libraries you just need the basics on.
+Generates a condensed cheat sheet with the essentials: quick reference tables, top APIs, and a few code examples. Scrapes 5 sources.
 
 ### `/learn {topic} --deep` — Exhaustive deep dive
 
@@ -88,7 +89,7 @@ Generates a condensed ~3-page cheat sheet with the essentials: quick reference t
 /learn stripe --deep
 ```
 
-Generates an exhaustive ~15-page skill covering the full API surface, edge cases, advanced patterns, testing, migration notes, and more.
+Generates an exhaustive skill covering the full API surface, edge cases, advanced patterns, testing, migration notes, and more. Scrapes up to 25 sources.
 
 ### `/learn {topic} --lang {language}` — Force a language
 
@@ -177,10 +178,21 @@ Smart update with staleness detection:
 ```
 /learn-list            # show all skills
 /learn-list database   # filter by name, tag, or description
+/learn-list framework  # filter by type
 /learn-list python     # filter by language
 ```
 
-Shows a rich table with version, language, generated date, and staleness status.
+Shows a rich table with type, version, language, generated date, staleness status, and quality grade (A/B/C).
+
+### `/learn-audit` — Quality check skills
+
+```
+/learn-audit           # audit all skills
+/learn-audit stripe    # audit one skill
+/learn-audit --fix     # audit and auto-fix issues
+```
+
+Runs 27 quality checks across 4 categories (frontmatter, structure, code quality, formatting) without re-scraping. Assigns a letter grade (A-D) and reports exactly what's wrong. With `--fix`, automatically repairs issues that don't require web scraping (missing frontmatter fields, bare code blocks, pseudocode comments, etc.).
 
 ### `/learn-delete` — Remove a skill
 
@@ -206,17 +218,48 @@ A structured `SKILL.md` file that Claude Code automatically picks up:
     SKILL.md
 ```
 
+### Library type awareness
+
+Every skill is classified as one of 8 types, and the template adapts:
+
+| Type | Example | What gets emphasized |
+|------|---------|---------------------|
+| `api-client` | Stripe, OpenAI | Endpoint tables, auth setup, error codes, rate limits |
+| `framework` | Hono, Express | Routing, middleware, project structure, deployment |
+| `ui-library` | React, Shadcn | Component props, composition, styling, accessibility |
+| `orm-db` | Drizzle, Prisma | Schema, queries, migrations, transactions |
+| `cli-tool` | Vite, esbuild | Command reference, config files, flag combos |
+| `utility` | Zod, date-fns | Function signatures, generics, tree-shaking |
+| `platform` | Supabase, Firebase | IAM/credentials, service setup, pricing gotchas |
+| `testing` | Vitest, Playwright | Assertions, mocking, fixtures, CI integration |
+
+### Quality gate system
+
+Every generated skill passes through 12 hard quality gates and a 6-dimension scoring rubric before being saved:
+
+- **Completeness** — are all applicable sections filled?
+- **Accuracy** — do params/types match official docs?
+- **Code Quality** — are examples runnable with imports?
+- **Trigger Coverage** — will an agent find this skill?
+- **Actionability** — can an agent use this without external docs?
+- **Structure** — tables vs prose, scanability
+
+Skills that fail quality checks get automatically improved before saving.
+
+### Skill contents
+
 Each skill contains:
-- **Frontmatter** with trigger keywords, version, language, tags, and generation date
-- **Quick reference** tables
-- **API reference** with parameter tables
-- **Working code examples** with imports (not pseudocode)
-- **Error handling** guides
+- **Frontmatter** with trigger keywords, version, language, type, tags, and generation date
+- **Quick reference** tables (format adapts to library type)
+- **API reference** with parameter tables, return types, and gotcha warnings
+- **Working code examples** with imports (minimum 4 per skill, 8 in deep mode)
+- **Error handling** tables with cause and fix columns
 - **Setup/install** instructions
 - **Prerequisites** and runtime requirements
 - **TypeScript integration** patterns (for TS libraries)
 - **Testing** patterns and mock utilities
-- **Deprecated APIs** with replacements
+- **Common mistakes** to avoid
+- **Deprecated APIs** with replacements and version info
 - **Migration notes** between major versions
 - **Related skills** linking to other installed skills
 
@@ -228,6 +271,7 @@ description: Stripe payment processing API. Use when integrating payments, creat
 version: "15.0.0"
 generated: "2025-01-15"
 language: typescript
+type: api-client
 tags: [payments, api, webhooks, sdk, billing]
 ---
 ```
@@ -246,28 +290,102 @@ Phase 1: Parse input (topic? flags? file? URL? subtopic?)
 Phase 2: Detect project language (auto or --lang flag)
     |
     v
-Phase 3: Multi-strategy web search
-         - Official docs
-         - GitHub README
-         - Tutorials & cheat sheets
-         - Raw/fallback sources if JS sites fail
-         - Package registry (npm/pypi/crates/go)
-         - Changelog & migration guides
+Phase 2.5: Classify library type (api-client, framework, etc.)
     |
     v
-Phase 4: Scrape & extract (parallel fetching, soft-failure detection)
+Phase 3: Multi-strategy web search (7 strategies)
+         A. Official docs
+         B. GitHub README + docs folder + homepage
+         C. Tutorials & cheat sheets
+         D. Sitemap discovery + docs index crawling
+         E. Raw/fallback sources (GitHub wiki, StackOverflow, Wayback)
+         F. Package registry (npm/pypi/crates/go/rubygems/hex)
+         G. Changelog + migration guides (direct fetch)
+    |
+    v
+Phase 4: Smart scraping pipeline
+         4.1 URL queue with 1-5 priority scoring
+         4.2 Parallel fetching with retry + exponential backoff
+         4.3 Depth-1 link crawling (follow internal doc links)
+         4.4 Structured content extraction
+         4.5 Content deduplication
+         4.6 Coverage tracking
     |
     v
 Phase 5: Check for existing skill (update vs create)
     |
     v
-Phase 6: Generate structured SKILL.md (depth-aware, language-specific)
+Phase 6: Generate type-aware SKILL.md
+         6.1 Frontmatter with type field
+         6.2 Type-aware section emphasis
+         6.3 Structured template with return types + gotchas
+         6.4 Depth-specific section rules
+         6.5 Strict quality rules for code + structure
     |
     v
-Phase 7: Verify & report to user
+Phase 7: Self-critique & quality gate
+         7.1 Score on 6-dimension rubric (0-10 each)
+         7.2 Pass 12 hard quality gates
+         7.3 Auto-fix any dimension scoring below 7
+         7.4 Report with quality scores to user
 ```
 
 All using Claude Code's built-in tools: `WebSearch`, `WebFetch`, `Read`, `Write`, `Glob`, `Bash`.
+
+---
+
+## Commands reference
+
+| Command | Description |
+|---------|-------------|
+| `/learn {topic}` | Generate a skill from web docs |
+| `/learn {topic} --quick` | Quick cheat-sheet (5 sources) |
+| `/learn {topic} --deep` | Exhaustive deep-dive (25 sources) |
+| `/learn {topic} --lang {lang}` | Force example language |
+| `/learn {topic}:{subtopic}` | Focus on a subtopic |
+| `/learn {file}` | Generate from local file (best quality) |
+| `/learn {url}` | Generate from a URL |
+| `/learn {github-url}` | Generate from GitHub repo |
+| `/learn @scope/pkg` | Scoped npm package support |
+| `/learn-update` | Refresh all stale skills |
+| `/learn-update {name}` | Refresh a specific skill |
+| `/learn-list` | List all installed skills |
+| `/learn-list {filter}` | Filter by name, tag, type, or language |
+| `/learn-audit` | Quality check all skills |
+| `/learn-audit {name}` | Quality check one skill |
+| `/learn-audit --fix` | Auto-fix quality issues |
+| `/learn-delete {name}` | Delete a skill |
+
+---
+
+## Runtime Scraper (optional, recommended)
+
+For faster, cached, and more reliable scraping, install the Python runtime scraper:
+
+```bash
+cd claude-learn
+pip install -r requirements.txt
+```
+
+The `/learn` command automatically detects and uses the scraper when available. Benefits:
+
+| Feature | Without scraper | With scraper |
+|---------|----------------|-------------|
+| Fetching | Sequential WebFetch calls | Async parallel (5-8 concurrent) |
+| Caching | None (re-scrapes every run) | 6-hour file cache (instant repeats) |
+| Retry | Instructed, not enforced | Enforced exponential backoff (2s/4s/8s) |
+| Rate limiting | None | 0.5s per-domain throttle |
+| Deduplication | Content comparison in prompt | Jaccard similarity > 0.9 = auto-skip |
+
+The scraper is **completely optional** — `/learn` works fine without it using Claude's built-in WebSearch/WebFetch. The scraper just makes it faster and more reliable.
+
+```bash
+# Test it works
+python -m scraper "hono" --mode quick --urls https://hono.dev/docs
+
+# Run tests (64 tests)
+python -m pytest scraper/tests/ -v
+```
 
 ---
 
@@ -275,7 +393,7 @@ All using Claude Code's built-in tools: `WebSearch`, `WebFetch`, `Read`, `Write`
 
 Being honest about what a free solution can't do:
 
-- **JS-rendered docs sites** (React docs, Vercel docs, etc.) may not scrape well with `WebFetch`. The command has fallbacks (GitHub raw READMEs, npm pages, Wayback Machine, blog posts) but a headless browser will always do better here.
+- **JS-rendered docs sites** (React docs, Vercel docs, etc.) may not scrape well with `WebFetch`. The command has fallbacks (GitHub raw READMEs, sitemaps, npm pages, Wayback Machine, GitHub wikis, StackOverflow) but a headless browser will always do better here.
 - **Gated/authenticated docs** can't be scraped. Use local file mode instead: download the docs and run `/learn ./path/to/file`.
 - **Very large APIs** (AWS, GCP) will be summarized to the most important parts. Use subtopic focus (`/learn aws:s3`) for better coverage.
 - **Version detection** relies on package registries and web scraping — it may not always find the exact latest version.
@@ -289,7 +407,6 @@ Being honest about what a free solution can't do:
 PRs welcome. Some ideas:
 
 - [ ] Skill sharing — export/import skills between users
-- [ ] Skill quality scoring
 - [ ] Community skill registry
 - [ ] Auto-update scheduler
 
