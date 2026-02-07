@@ -4,6 +4,62 @@ The user wants to learn about: **$ARGUMENTS**
 
 ---
 
+## Phase 0: Check for Runtime Scraper
+
+Before starting the pipeline, check if the Python runtime scraper is available:
+
+```
+Bash: python -c "import scraper" 2>/dev/null && echo "SCRAPER_AVAILABLE" || echo "SCRAPER_MISSING"
+```
+
+**If `SCRAPER_AVAILABLE`:** Use the runtime scraper for Phases 3-4. This gives you:
+- Real async concurrency (5-8 parallel fetches)
+- File-based caching (6-hour TTL — repeated runs are instant)
+- Automatic retry with exponential backoff (enforced, not just instructed)
+- Per-domain rate limiting (0.5s between requests)
+- Content deduplication (Jaccard similarity > 0.9 = skip)
+- Sitemap discovery and link crawling built-in
+
+Run it like this:
+```
+Bash: python -m scraper "$TOPIC" --mode {quick|default|deep} --urls {initial_urls_from_search...}
+```
+
+The scraper outputs JSON to stdout with structure:
+```json
+{
+  "topic": "stripe",
+  "mode": "default",
+  "pages": [
+    {
+      "url": "https://docs.stripe.com/api",
+      "title": "Stripe API Reference",
+      "text": "...",
+      "code_blocks": ["..."],
+      "headings": ["..."],
+      "tables": ["..."],
+      "word_count": 5000
+    }
+  ],
+  "stats": {
+    "urls_discovered": 45,
+    "urls_fetched": 12,
+    "urls_cached": 3,
+    "urls_failed": 2,
+    "pages_extracted": 10,
+    "total_time_seconds": 8.5
+  }
+}
+```
+
+Read the JSON output and use the `pages` array as your scraped content for Phase 6 generation. Skip Phases 3-4 entirely when using the runtime scraper — it handles research, fetching, caching, and dedup.
+
+After generation, include scraper stats in the Phase 7 report.
+
+**If `SCRAPER_MISSING`:** Fall back to the built-in WebSearch/WebFetch pipeline (Phases 3-4 as described below). The skill quality will be the same — the runtime scraper just adds caching, retry enforcement, and speed.
+
+---
+
 ## Phase 1: Parse Input
 
 Determine what the user is asking you to learn. Parse `$ARGUMENTS` into these components:
