@@ -4,6 +4,7 @@ import pytest
 from scraper.discovery import (
     parse_sitemap_urls, filter_doc_urls, parse_robots_txt,
     is_disallowed, extract_doc_links, find_sitemap_urls,
+    find_changelog_urls, detect_version, extract_changelog_entries,
 )
 
 
@@ -227,3 +228,109 @@ Disallow: /private/
             assert url.startswith("https://docs.stripe.com/")
             # Should not include /api/v2/charges
             assert "/api/" not in url
+
+
+class TestFindChangelogURLs:
+    def test_generates_candidates(self):
+        candidates = find_changelog_urls("https://docs.stripe.com/api", "stripe")
+        assert any("changelog" in url.lower() for url in candidates)
+        assert any("releases" in url for url in candidates)
+
+    def test_github_urls_include_repo_releases(self):
+        candidates = find_changelog_urls("https://github.com/honojs/hono", "hono")
+        assert "https://github.com/honojs/hono/releases" in candidates
+        assert any("CHANGELOG.md" in url for url in candidates)
+
+    def test_non_github_has_no_repo_paths(self):
+        candidates = find_changelog_urls("https://docs.stripe.com", "stripe")
+        assert not any("blob/main" in url for url in candidates)
+
+
+class TestDetectVersion:
+    def test_detects_v_prefix(self):
+        text = "This documentation covers v4.3.2 of the library."
+        assert detect_version(text) == "4.3.2"
+
+    def test_detects_version_keyword(self):
+        text = "Current version: 2.1.0. See release notes for details."
+        assert detect_version(text) == "2.1.0"
+
+    def test_detects_npm_at_version(self):
+        text = "Install with npm install stripe@14.2.0"
+        assert detect_version(text) == "14.2.0"
+
+    def test_detects_scoped_npm(self):
+        text = "Install @hono/node-server@1.5.0 for Node.js support"
+        assert detect_version(text) == "1.5.0"
+
+    def test_returns_none_for_no_version(self):
+        text = "Welcome to the documentation. Here is how to get started."
+        assert detect_version(text) is None
+
+    def test_returns_none_for_empty(self):
+        assert detect_version("") is None
+        assert detect_version(None) is None
+
+    def test_picks_most_common_version(self):
+        text = "v4.3.2 is the latest. Install v4.3.2. Upgrade to v4.3.2 from v3.0.0."
+        result = detect_version(text)
+        assert result == "4.3.2"
+
+    def test_handles_prerelease_versions(self):
+        text = "Now available: v5.0.0-beta.1"
+        result = detect_version(text)
+        assert result == "5.0.0-beta.1"
+
+    def test_two_digit_version(self):
+        text = "API version 2.0 is now stable."
+        assert detect_version(text) == "2.0"
+
+
+class TestExtractChangelogEntries:
+    def test_extracts_markdown_changelog(self):
+        text = """# Changelog
+
+## 4.3.2 (2024-12-15)
+- Fixed authentication bug
+- Updated dependencies
+
+## 4.3.1 (2024-11-20)
+- Minor patch release
+- Fixed typo in docs
+
+## 4.3.0 (2024-10-01)
+- New middleware system
+- Breaking: removed legacy API
+"""
+        entries = extract_changelog_entries(text)
+        assert len(entries) == 3
+        assert entries[0]["version"] == "4.3.2"
+        assert entries[0]["date"] == "2024-12-15"
+        assert "authentication" in entries[0]["summary"]
+        assert entries[1]["version"] == "4.3.1"
+
+    def test_extracts_v_prefix_headings(self):
+        text = """## v2.0.0 (2024-06-01)
+Major rewrite with new API.
+
+## v1.9.0
+Minor improvements.
+"""
+        entries = extract_changelog_entries(text)
+        assert len(entries) == 2
+        assert entries[0]["version"] == "2.0.0"
+        assert entries[0]["date"] == "2024-06-01"
+        assert entries[1]["version"] == "1.9.0"
+        assert entries[1]["date"] == ""
+
+    def test_limits_entries(self):
+        text = "\n".join(f"## {i}.0.0\nRelease {i}" for i in range(20, 0, -1))
+        entries = extract_changelog_entries(text, limit=3)
+        assert len(entries) == 3
+
+    def test_empty_text(self):
+        assert extract_changelog_entries("") == []
+
+    def test_no_matching_headings(self):
+        text = "# Introduction\nThis is not a changelog."
+        assert extract_changelog_entries(text) == []

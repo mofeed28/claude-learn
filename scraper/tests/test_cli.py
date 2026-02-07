@@ -79,6 +79,36 @@ class TestBuildParser:
         args = parser.parse_args(["hono"])
         assert args.timeout == 15.0
 
+    def test_verbose_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["hono", "--verbose"])
+        assert args.verbose is True
+
+    def test_verbose_short_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["hono", "-v"])
+        assert args.verbose is True
+
+    def test_verbose_default_false(self):
+        parser = build_parser()
+        args = parser.parse_args(["hono"])
+        assert args.verbose is False
+
+    def test_output_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["hono", "--output", "result.json"])
+        assert args.output == "result.json"
+
+    def test_output_short_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["hono", "-o", "out.json"])
+        assert args.output == "out.json"
+
+    def test_output_default_none(self):
+        parser = build_parser()
+        args = parser.parse_args(["hono"])
+        assert args.output is None
+
 
 class TestMainWiring:
     """Test that main() correctly wires args to ScrapeConfig and run_scraper."""
@@ -99,6 +129,8 @@ class TestMainWiring:
                 cache_dir="/tmp/test",
                 no_cache=False,
                 timeout=20.0,
+                verbose=False,
+                output=None,
             )
             mock_parser_fn.return_value = mock_parser
             main()
@@ -121,6 +153,8 @@ class TestMainWiring:
                 cache_dir="~/.cache/test",
                 no_cache=True,
                 timeout=15.0,
+                verbose=False,
+                output=None,
             )
             mock_parser_fn.return_value = mock_parser
 
@@ -128,9 +162,9 @@ class TestMainWiring:
             original_run_scraper = run_scraper
             captured_configs = []
 
-            async def mock_run(topic, config, initial_urls=None):
+            async def mock_run(topic, config, initial_urls=None, verbose=False):
                 captured_configs.append(config)
-                return {"topic": topic, "pages": [], "stats": {}, "urls_fetched": []}
+                return {"topic": topic, "pages": [], "stats": {}, "urls_fetched": [], "version": None, "changelog": []}
 
             with patch("scraper.cli.run_scraper", side_effect=mock_run):
                 # asyncio.run should call the coroutine
@@ -159,7 +193,7 @@ class TestMainWiring:
             mock_parser = MagicMock()
             mock_parser.parse_args.return_value = MagicMock(
                 topic="test", mode="default", urls=[], cache_dir="~/.cache/test",
-                no_cache=False, timeout=15.0,
+                no_cache=False, timeout=15.0, verbose=False, output=None,
             )
             mock_parser_fn.return_value = mock_parser
             main()
@@ -191,6 +225,8 @@ class TestRunScraper:
         assert isinstance(result["pages"], list)
         assert isinstance(result["stats"], dict)
         assert isinstance(result["urls_fetched"], list)
+        assert "version" in result
+        assert "changelog" in result
 
     @pytest.mark.asyncio
     async def test_empty_run_has_zero_stats(self):
