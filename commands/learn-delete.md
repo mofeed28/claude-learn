@@ -44,6 +44,7 @@ Read the skill's frontmatter and show what will be deleted:
 ```
 Skill to delete:
   Name: {name}
+  Type: {type}
   Version: {version}
   Language: {language}
   Generated: {generated}
