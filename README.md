@@ -4,8 +4,10 @@
 
 ```
 /learn stripe
-/learn drizzle-orm
-/learn react:hooks
+/learn drizzle-orm --deep
+/learn react:hooks --lang typescript
+/learn @tanstack/query
+/learn https://github.com/honojs/hono
 /learn ./docs/my-api.yaml
 ```
 
@@ -19,7 +21,7 @@ Claude Code agents are powerful, but they don't know every library or API out of
 
 - **No API keys** — uses Claude Code's built-in WebSearch and WebFetch
 - **No subscriptions** — completely free
-- **No setup** — copy 3 files and restart
+- **No setup** — copy 4 files and restart
 
 ---
 
@@ -27,7 +29,7 @@ Claude Code agents are powerful, but they don't know every library or API out of
 
 ### Option 1: Quick copy (recommended)
 
-Copy the 3 files from `commands/` into your `~/.claude/commands/` directory:
+Copy the 4 files from `commands/` into your `~/.claude/commands/` directory:
 
 ```bash
 # macOS / Linux
@@ -53,6 +55,7 @@ mkdir -p ~/.claude/commands
 cp commands/learn.md ~/.claude/commands/
 cp commands/learn-update.md ~/.claude/commands/
 cp commands/learn-list.md ~/.claude/commands/
+cp commands/learn-delete.md ~/.claude/commands/
 ```
 
 Then **restart Claude Code**.
@@ -70,6 +73,39 @@ Then **restart Claude Code**.
 Searches the web for Stripe docs, scrapes them, and generates a complete skill at `~/.claude/skills/stripe/SKILL.md`.
 
 Your agent now knows Stripe — endpoints, parameters, auth, error codes, code examples, the works.
+
+### `/learn {topic} --quick` — Quick cheat sheet
+
+```
+/learn stripe --quick
+```
+
+Generates a condensed ~3-page cheat sheet with the essentials: quick reference tables, top APIs, and a few code examples. Great for libraries you just need the basics on.
+
+### `/learn {topic} --deep` — Exhaustive deep dive
+
+```
+/learn stripe --deep
+```
+
+Generates an exhaustive ~15-page skill covering the full API surface, edge cases, advanced patterns, testing, migration notes, and more.
+
+### `/learn {topic} --lang {language}` — Force a language
+
+```
+/learn stripe --lang python
+/learn hono --lang typescript
+```
+
+Forces all code examples to use a specific language. By default, `/learn` auto-detects your project language from files like `package.json`, `requirements.txt`, `Cargo.toml`, etc.
+
+### `/learn {topic} {topic}` — Multiple topics
+
+```
+/learn stripe hono
+```
+
+Processes each topic independently, generating a separate skill for each.
 
 ### `/learn {topic}:{subtopic}` — Focus on a specific area
 
@@ -105,6 +141,23 @@ Generates a skill focused on just that subtopic instead of the entire technology
 
 Fetches the URL directly. If it fails (JS-rendered page), falls back to web search.
 
+### `/learn {github-url}` — Learn from a GitHub repo
+
+```
+/learn https://github.com/honojs/hono
+```
+
+Extracts owner/repo, fetches the README, repo metadata, and docs folder automatically. This often produces better results than a plain topic name.
+
+### `/learn @scope/package` — Scoped npm packages
+
+```
+/learn @tanstack/query
+/learn @trpc/server
+```
+
+Handles scoped npm packages correctly — uses the full name for search and flattens to a slug (e.g. `tanstack-query`) for the skill directory.
+
 ### `/learn-update` — Refresh skills
 
 ```
@@ -112,15 +165,30 @@ Fetches the URL directly. If it fails (JS-rendered page), falls back to web sear
 /learn-update stripe   # update just one
 ```
 
-Re-scrapes the latest docs and merges new info into existing skills. Preserves your customizations.
+Smart update with staleness detection:
+- Checks package registries for the latest version before doing a full re-scrape
+- Skips skills that are fresh (same version + less than 30 days old)
+- Shows a diff of what changed: new endpoints, updated sections, deprecations
+- Fetches changelogs between old and new versions
+- Preserves user customizations (lines marked `<!-- user -->` and custom sections)
 
 ### `/learn-list` — See installed skills
 
 ```
-/learn-list
+/learn-list            # show all skills
+/learn-list database   # filter by name, tag, or description
+/learn-list python     # filter by language
 ```
 
-Shows a table of all installed skills with names, descriptions, and paths.
+Shows a rich table with version, language, generated date, and staleness status.
+
+### `/learn-delete` — Remove a skill
+
+```
+/learn-delete stripe
+```
+
+Deletes a skill after confirmation. Supports partial name matching.
 
 ---
 
@@ -139,18 +207,28 @@ A structured `SKILL.md` file that Claude Code automatically picks up:
 ```
 
 Each skill contains:
-- **Frontmatter** with trigger keywords (so Claude knows when to use it)
+- **Frontmatter** with trigger keywords, version, language, tags, and generation date
 - **Quick reference** tables
 - **API reference** with parameter tables
-- **Working code examples** (not pseudocode)
+- **Working code examples** with imports (not pseudocode)
 - **Error handling** guides
 - **Setup/install** instructions
+- **Prerequisites** and runtime requirements
+- **TypeScript integration** patterns (for TS libraries)
+- **Testing** patterns and mock utilities
+- **Deprecated APIs** with replacements
+- **Migration notes** between major versions
+- **Related skills** linking to other installed skills
 
 Example frontmatter:
 ```yaml
 ---
 name: stripe
 description: Stripe payment processing API. Use when integrating payments, creating charges, managing subscriptions, handling webhooks, or working with Stripe Elements/Checkout.
+version: "15.0.0"
+generated: "2025-01-15"
+language: typescript
+tags: [payments, api, webhooks, sdk, billing]
 ---
 ```
 
@@ -159,32 +237,37 @@ description: Stripe payment processing API. Use when integrating payments, creat
 ## How it works
 
 ```
-/learn stripe
+/learn stripe --lang python
     |
     v
-Phase 1: Parse input (topic? file? URL? subtopic?)
+Phase 1: Parse input (topic? flags? file? URL? subtopic?)
     |
     v
-Phase 2: Multi-strategy web search
+Phase 2: Detect project language (auto or --lang flag)
+    |
+    v
+Phase 3: Multi-strategy web search
          - Official docs
          - GitHub README
          - Tutorials & cheat sheets
          - Raw/fallback sources if JS sites fail
+         - Package registry (npm/pypi/crates/go)
+         - Changelog & migration guides
     |
     v
-Phase 3: Scrape & extract (parallel fetching)
+Phase 4: Scrape & extract (parallel fetching, soft-failure detection)
     |
     v
-Phase 4: Check for existing skill (update vs create)
+Phase 5: Check for existing skill (update vs create)
     |
     v
-Phase 5: Generate structured SKILL.md
+Phase 6: Generate structured SKILL.md (depth-aware, language-specific)
     |
     v
-Phase 6: Verify & report to user
+Phase 7: Verify & report to user
 ```
 
-All using Claude Code's built-in tools: `WebSearch`, `WebFetch`, `Read`, `Write`, `Glob`.
+All using Claude Code's built-in tools: `WebSearch`, `WebFetch`, `Read`, `Write`, `Glob`, `Bash`.
 
 ---
 
@@ -192,9 +275,10 @@ All using Claude Code's built-in tools: `WebSearch`, `WebFetch`, `Read`, `Write`
 
 Being honest about what a free solution can't do:
 
-- **JS-rendered docs sites** (React docs, Vercel docs, etc.) may not scrape well with `WebFetch`. The command has fallbacks (GitHub raw READMEs, npm pages, blog posts) but a headless browser will always do better here.
+- **JS-rendered docs sites** (React docs, Vercel docs, etc.) may not scrape well with `WebFetch`. The command has fallbacks (GitHub raw READMEs, npm pages, Wayback Machine, blog posts) but a headless browser will always do better here.
 - **Gated/authenticated docs** can't be scraped. Use local file mode instead: download the docs and run `/learn ./path/to/file`.
 - **Very large APIs** (AWS, GCP) will be summarized to the most important parts. Use subtopic focus (`/learn aws:s3`) for better coverage.
+- **Version detection** relies on package registries and web scraping — it may not always find the exact latest version.
 
 **Workaround for any limitation:** Download the docs locally and use `/learn ./file`. This always produces the best output.
 
@@ -204,10 +288,10 @@ Being honest about what a free solution can't do:
 
 PRs welcome. Some ideas:
 
-- [ ] More fallback strategies for JS-heavy sites
 - [ ] Skill sharing — export/import skills between users
 - [ ] Skill quality scoring
 - [ ] Community skill registry
+- [ ] Auto-update scheduler
 
 ---
 

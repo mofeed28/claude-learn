@@ -6,40 +6,103 @@ The user wants to learn about: **$ARGUMENTS**
 
 ## Phase 1: Parse Input
 
-Determine what the user is asking you to learn:
+Determine what the user is asking you to learn. Parse `$ARGUMENTS` into these components:
 
-1. **If `$ARGUMENTS` is a file path or URL:**
-   - If it's a local file path (e.g. `./docs/api.md`, `C:\docs\spec.apib`), read it directly with the Read tool. This is the **highest quality source** — skip web search and go straight to Phase 3.
-   - If it's a URL, fetch it with WebFetch. If it succeeds, use it as the primary source and supplement with web search. If it fails, fall back to web search.
+### 1.1 Extract Flags
 
-2. **If `$ARGUMENTS` is a topic name** (e.g. `stripe`, `drizzle-orm`, `hono`):
-   - Proceed to Phase 2.
+Scan `$ARGUMENTS` for flags and remove them from the topic string:
 
-3. **If `$ARGUMENTS` contains a colon separator** (e.g. `stripe:payments` or `react:hooks`):
+| Flag | Effect |
+|------|--------|
+| `--quick` | Cheat-sheet mode: aim for ~3 pages, skip deep API reference, focus on quick-reference tables and 3-5 code examples |
+| `--deep` | Exhaustive mode: aim for ~15 pages, cover full API surface, include edge cases, advanced patterns, internals |
+| `--lang {language}` | Force a specific language for examples (e.g. `--lang python`, `--lang rust`). Overrides auto-detection |
+
+If no depth flag is given, default to **balanced** mode (~8 pages).
+
+Store the detected flags for use in later phases.
+
+### 1.2 Handle Multiple Topics
+
+If `$ARGUMENTS` contains multiple space-separated topics (after removing flags), run the **entire pipeline** (Phases 1-7) for each topic independently. Example: `/learn stripe hono` processes `stripe` and `hono` as separate skills.
+
+### 1.3 Classify Each Topic
+
+For each topic, determine its type:
+
+1. **Local file path** (e.g. `./docs/api.md`, `C:\docs\spec.apib`)
+   - Read it directly with the Read tool. This is the **highest quality source** — skip web search and go straight to Phase 3.
+
+2. **GitHub URL** (matches `github.com/{owner}/{repo}`)
+   - Extract `{owner}` and `{repo}` from the URL.
+   - Fetch the README via `https://raw.githubusercontent.com/{owner}/{repo}/main/README.md` (try `master` if `main` fails).
+   - Fetch repo metadata via Bash: `gh api repos/{owner}/{repo}` to get description, topics, language, stars.
+   - Check for a docs folder via Bash: `gh api repos/{owner}/{repo}/contents/docs` — if it exists, fetch key `.md` files from it.
+   - Use the repo name as the topic for web search in Phase 2.
+
+3. **Other URL** (any non-GitHub URL)
+   - Fetch it with WebFetch. If it succeeds, use it as the primary source and supplement with web search. If it fails, fall back to web search.
+
+4. **Scoped npm package** (matches `@scope/name`, e.g. `@tanstack/query`)
+   - Use the full scoped name (e.g. `@tanstack/query`) for all web searches.
+   - Derive the slug by flattening: `@tanstack/query` → `tanstack-query`.
+
+5. **Topic with subtopic** (contains `:`, e.g. `stripe:webhooks`, `react:hooks`)
    - The part before `:` is the technology, the part after is the specific subtopic to focus on.
+
+6. **Plain topic name** (e.g. `stripe`, `drizzle-orm`, `hono`)
+   - Proceed to Phase 2.
 
 ---
 
-## Phase 2: Multi-Strategy Research
+## Phase 2: Detect Project Language
+
+Before researching, check the user's working directory to detect their project language. This tailors examples to what they're actually using.
+
+Check these files (in order, stop at first match):
+
+| File | Language |
+|------|----------|
+| `package.json` | JavaScript/TypeScript (check for `"typescript"` in devDependencies to distinguish) |
+| `tsconfig.json` | TypeScript |
+| `requirements.txt` | Python |
+| `pyproject.toml` | Python |
+| `Cargo.toml` | Rust |
+| `go.mod` | Go |
+| `Gemfile` | Ruby |
+| `build.gradle` or `pom.xml` | Java/Kotlin |
+| `*.csproj` or `*.sln` | C# |
+
+Use Glob to quickly check: `{package.json,tsconfig.json,requirements.txt,pyproject.toml,Cargo.toml,go.mod,Gemfile,build.gradle,pom.xml,*.csproj,*.sln}`
+
+If `--lang` flag was provided, it **overrides** auto-detection.
+
+If no language is detected and no flag is given, generate language-agnostic examples or use the library's primary/most popular language.
+
+Store the detected language as `$LANGUAGE` for use in Phase 5.
+
+---
+
+## Phase 3: Multi-Strategy Research
 
 Run these search strategies **in parallel** where possible. The goal is to find the best sources, not all sources.
 
 ### Strategy A: Official Docs
 ```
-WebSearch: "$ARGUMENTS official documentation"
-WebSearch: "$ARGUMENTS API reference"
+WebSearch: "$TOPIC official documentation"
+WebSearch: "$TOPIC API reference"
 ```
 
 ### Strategy B: GitHub Source
 ```
-WebSearch: "$ARGUMENTS github repository README"
-WebSearch: "site:github.com $ARGUMENTS"
+WebSearch: "$TOPIC github repository README"
+WebSearch: "site:github.com $TOPIC"
 ```
 
 ### Strategy C: Practical Usage
 ```
-WebSearch: "$ARGUMENTS getting started tutorial examples"
-WebSearch: "$ARGUMENTS cheat sheet quick reference"
+WebSearch: "$TOPIC getting started tutorial examples"
+WebSearch: "$TOPIC cheat sheet quick reference"
 ```
 
 ### Strategy D: Raw/Alternative Sources (fallback)
@@ -48,11 +111,38 @@ If the official docs are JS-rendered SPAs that WebFetch can't scrape, try these 
 2. **GitHub API**: Use Bash with `gh api repos/{owner}/{repo}/readme --jq .content | base64 -d` if gh CLI is available
 3. **npm/PyPI/crates.io pages**: These are usually scrapeable
 4. **Dev.to / blog posts**: Often have comprehensive API overviews
-5. **GitHub docs folder**: Search for `site:github.com/{owner}/{repo}/tree/main/docs`
+5. **GitHub docs folder**: Fetch docs from `https://raw.githubusercontent.com/{owner}/{repo}/main/docs/` — try fetching key `.md` files (README.md, getting-started.md, api.md, guide.md, etc.)
+6. **Wayback Machine**: Try `https://web.archive.org/web/2024/{docs_url}` for JS-rendered sites that can't be scraped directly
+
+**Soft failure detection:** When fetching a page, check if the response is a soft failure:
+- Content is less than 500 characters
+- Content contains "sign in", "access denied", "log in to continue", "enable javascript"
+- Content is mostly navigation/boilerplate with no real documentation
+
+If a soft failure is detected, discard the result and move to the next source.
+
+### Strategy E: Package Registry
+Search the relevant package registry to get version info, README, and metadata:
+```
+WebSearch: "site:npmjs.com $TOPIC"        (for JS/TS)
+WebSearch: "site:pypi.org $TOPIC"         (for Python)
+WebSearch: "site:crates.io $TOPIC"        (for Rust)
+WebSearch: "site:pkg.go.dev $TOPIC"       (for Go)
+```
+Pick the registry that matches the detected `$LANGUAGE`, or search npm + pypi as defaults.
+
+From registry pages, extract: **current version**, **publish date**, **weekly downloads**, **peer dependencies**.
+
+### Strategy F: Changelog / Migration
+```
+WebSearch: "$TOPIC changelog breaking changes"
+WebSearch: "site:github.com $TOPIC releases"
+```
+From these results, extract: **recent breaking changes**, **deprecated APIs**, **migration guides between major versions**.
 
 ---
 
-## Phase 3: Scrape & Extract
+## Phase 4: Scrape & Extract
 
 From the best sources found, use WebFetch (or Read for local files) to extract:
 
@@ -64,31 +154,39 @@ From the best sources found, use WebFetch (or Read for local files) to extract:
 - **Common patterns** — typical usage workflows
 - **Error handling** — error codes, common pitfalls, troubleshooting
 - **Gotchas & rules** — case sensitivity, rate limits, security considerations
+- **Version info** — current stable version, minimum runtime version, LTS status
+- **Deprecated patterns** — what NOT to use, with replacement APIs and the version they were deprecated in
+- **Testing patterns** — how to mock/test code using this library, test utilities provided
 
 **Scraping rules:**
 - Fetch pages in parallel (3-5 at a time) for speed
 - If a page fails, don't retry more than once — move to the next source
-- Prioritize: Official docs > GitHub README > API reference > Blog posts
+- Prioritize: Official docs > GitHub README > API reference > Registry pages > Blog posts
 - For large docs, focus on the core API and most-used features. A skill that covers 80% well is better than 100% poorly.
+- In `--quick` mode, stop after fetching 3-5 of the best sources
+- In `--deep` mode, fetch up to 15 sources and cover edge cases
 
 ---
 
-## Phase 4: Check for Existing Skill
+## Phase 5: Check for Existing Skill
 
 Before generating, check if a skill already exists:
 ```
 Glob: ~/.claude/skills/$SLUG/SKILL.md
 ```
 
-- If it exists, **read it first**. You are updating, not creating from scratch. Preserve any user customizations or notes at the bottom of the file. Inform the user you're updating an existing skill.
+- If it exists, **read it first**. You are updating, not creating from scratch. Preserve any user customizations or notes (especially lines/sections marked with `<!-- user -->`). Inform the user you're updating an existing skill.
 - If it doesn't exist, create it fresh.
 
 ---
 
-## Phase 5: Generate the Skill
+## Phase 6: Generate the Skill
 
 Derive the slug: lowercase the topic name, replace spaces and special characters with hyphens.
-Example: `Drizzle ORM` → `drizzle-orm`, `Stripe Payments` → `stripe-payments`
+- `Drizzle ORM` → `drizzle-orm`
+- `Stripe Payments` → `stripe-payments`
+- `@tanstack/query` → `tanstack-query` (remove `@`, replace `/` with `-`)
+- `react:hooks` → `react-hooks`
 
 Create the directory and file at: `~/.claude/skills/{slug}/SKILL.md`
 
@@ -98,6 +196,10 @@ Create the directory and file at: `~/.claude/skills/{slug}/SKILL.md`
 ---
 name: {slug}
 description: {A specific, trigger-word-rich sentence. This is what Claude uses to decide when to activate the skill. Be precise. Bad: "Helps with Stripe". Good: "Stripe payment processing API. Use when integrating payments, creating charges, managing subscriptions, handling webhooks, or working with Stripe Elements/Checkout."}
+version: "{current stable version, e.g. 4.2.1}"
+generated: "{YYYY-MM-DD}"
+language: {detected language, e.g. typescript, python, rust — or "multi" if multi-language}
+tags: [{3-8 relevant tags, e.g. payments, api, webhooks, sdk}]
 ---
 
 # {Technology Name} Skill
@@ -115,6 +217,13 @@ Use this skill when the user needs to:
 - Docs: {url}
 - GitHub: {url}
 - Package: {npm/pip/cargo url}
+
+## Prerequisites
+
+{Only include if there are specific requirements. Omit if standard.}
+- Runtime: {e.g. Node.js >= 18, Python >= 3.9}
+- Peer dependencies: {if any}
+- Related skills: {if other installed skills pair with this one}
 
 ## Quick Reference
 
@@ -142,7 +251,8 @@ Use this skill when the user needs to:
 
 **Example:**
 ```{language}
-// real working code example
+import { ... } from '...';
+// real working code example with imports
 ```
 
 ## Common Patterns
@@ -157,13 +267,63 @@ Use this skill when the user needs to:
 |-------|-------|-----|
 | ... | ... | ... |
 
+## TypeScript Integration
+
+{Only include for JS/TS libraries. Key types, generics, inference patterns.}
+
+## Testing
+
+{How to mock/test code using this library. Test utilities provided.}
+
+## Deprecated / Avoid
+
+{Only include if deprecated patterns were found. Table format:}
+
+| Deprecated API | Replacement | Since Version |
+|----------------|-------------|---------------|
+| ... | ... | ... |
+
+## Migration Notes
+
+{Only include if breaking changes between major versions were found.}
+
+### v{X} → v{Y}
+- {Breaking change 1}
+- {Breaking change 2}
+
 ## Important Rules
 
 {Numbered list of critical things to remember}
 
 1. **{Rule}** — {explanation}
 2. ...
+
+## Related Skills
+
+{Only include if other installed skills are relevant. Check with Glob: ~/.claude/skills/*/SKILL.md}
+
+- `{skill-name}` — {how it relates}
 ```
+
+### Section Rules by Depth
+
+| Section | `--quick` | default | `--deep` |
+|---------|-----------|---------|----------|
+| When to Use | 3-5 bullets | 5-10 bullets | 5-10 bullets |
+| Overview | 1-2 sentences | 2-3 sentences | 3-5 sentences |
+| Prerequisites | omit | include if relevant | always include |
+| Quick Reference | include | include | include |
+| Installation & Setup | include | include | include |
+| Core Concepts | 3-5 bullets | full section | full + advanced |
+| API Reference | top 5-10 APIs | core APIs | full API surface |
+| Common Patterns | 2-3 patterns | 3-5 patterns | 5-10 patterns |
+| Error Handling | top 3-5 errors | full table | full + edge cases |
+| TypeScript Integration | omit | include if TS | full section |
+| Testing | omit | include if found | full section |
+| Deprecated / Avoid | omit | include if found | full table |
+| Migration Notes | omit | latest version only | all recent majors |
+| Important Rules | 3-5 rules | 5-10 rules | 10+ rules |
+| Related Skills | omit | include | include |
 
 ### Quality Rules
 
@@ -172,24 +332,35 @@ Use this skill when the user needs to:
 - **No placeholder sections** — if you don't have info for a section, omit it entirely rather than writing "TODO" or "See docs"
 - **No real API keys** — always use `YOUR_API_KEY`, `YOUR_SECRET`, etc.
 - **Case-sensitive names** — match the exact casing from official docs
-- **Include imports** in code examples — agents need complete, copy-pasteable code
+- **Include imports** in every code example — agents need complete, copy-pasteable code
+- **Language-specific examples** — all code examples must be in `$LANGUAGE`. If multi-language, use the detected project language, falling back to the library's primary language
 - **Concise** — if a section would exceed 50 lines, break it into subsections or trim to the most important parts
+- **All code blocks must have a language specifier** (```typescript, ```python, etc. — never bare ```)
+- **No `any` types in TypeScript examples** — use proper types, generics, or `unknown` if truly needed
 
 ---
 
-## Phase 6: Verify & Report
+## Phase 7: Verify & Report
 
 After writing the file:
 
 1. Read it back with the Read tool
 2. Verify:
-   - Frontmatter has `name` and `description`
-   - Description contains specific trigger words (not generic)
-   - At least 3 code examples exist
+   - Frontmatter has `name`, `description`, `version`, `generated`, `language`, and `tags`
+   - Description contains specific trigger words (not generic) and is at least 20 words
+   - All code blocks have a language specifier (no bare ```)
+   - Every code example includes import statements
+   - No `any` types in TypeScript examples
+   - All markdown tables have consistent column counts (no mismatched `|` separators)
+   - At least 3 code examples exist (at least 2 in `--quick` mode)
    - No `TODO`, `TBD`, `...`, or placeholder text remains
    - Tables are properly formatted
-3. Report to the user:
+   - File is between 50-500 lines (warn if outside this range — under 50 means too sparse, over 500 means consider splitting)
+3. Fix any issues found during verification before reporting
+4. Report to the user:
    - Skill path: `~/.claude/skills/{slug}/SKILL.md`
+   - Version detected: `{version}`
+   - Language: `{language}`
    - Sources used (list the URLs you successfully scraped)
    - Coverage assessment: what % of the API/docs you covered
    - Anything you couldn't find or that needs manual additions
@@ -200,7 +371,7 @@ After writing the file:
 ## Special Modes
 
 ### Update mode
-If the user runs `/learn {topic}` and the skill already exists, you are updating it. Merge new information with existing content. Don't lose existing customizations.
+If the user runs `/learn {topic}` and the skill already exists, you are updating it. Merge new information with existing content. Don't lose existing customizations. Preserve any lines or sections marked with `<!-- user -->`.
 
 ### Focused mode
 If the user uses colon syntax like `/learn react:hooks` or `/learn stripe:webhooks`, generate a skill focused specifically on that subtopic, not the entire technology.
@@ -213,3 +384,6 @@ If the user passes a file path like `/learn ./docs/api.yaml` or `/learn C:\specs
 - Plain text (.txt)
 - PDF (.pdf)
 - Any other text-based format
+
+### GitHub URL mode
+If the user passes a GitHub URL like `/learn https://github.com/honojs/hono`, extract the owner/repo, fetch the README, metadata, and docs folder, then supplement with web search. This often produces better results than a plain topic name because you get the exact source.
