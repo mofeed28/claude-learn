@@ -38,7 +38,7 @@ class PageCache:
             return None
 
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
 
@@ -68,7 +68,7 @@ class PageCache:
         }
         path = self._path(url)
         try:
-            path.write_text(json.dumps(data, ensure_ascii=False))
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         except OSError as e:
             log.warning("Cache write failed for %s: %s", url, e)
 
@@ -77,7 +77,7 @@ class PageCache:
         entries = []
         for path in self.cache_dir.glob("*.json"):
             try:
-                data = json.loads(path.read_text())
+                data = json.loads(path.read_text(encoding="utf-8"))
                 entries.append((data.get("cached_at", 0), path))
             except (json.JSONDecodeError, OSError):
                 path.unlink(missing_ok=True)
@@ -100,7 +100,7 @@ class PageCache:
         now = time.time()
         for path in self.cache_dir.glob("*.json"):
             try:
-                data = json.loads(path.read_text())
+                data = json.loads(path.read_text(encoding="utf-8"))
                 if now > data.get("expires_at", 0):
                     path.unlink(missing_ok=True)
             except (json.JSONDecodeError, OSError):

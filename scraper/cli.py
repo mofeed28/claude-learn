@@ -63,7 +63,11 @@ def _validate_urls(urls: list[str]) -> None:
 def _progress(msg: str, verbose: bool) -> None:
     """Print progress to stderr (so stdout stays clean for JSON)."""
     if verbose:
-        print(f"  [scraper] {msg}", file=sys.stderr, flush=True)
+        # Encode safely for Windows consoles that may not support full Unicode
+        safe_msg = msg.encode(sys.stderr.encoding or "utf-8", errors="replace").decode(
+            sys.stderr.encoding or "utf-8", errors="replace"
+        )
+        print(f"  [scraper] {safe_msg}", file=sys.stderr, flush=True)
 
 
 async def _discover_sitemaps(
@@ -407,14 +411,14 @@ def main() -> None:
     )
 
     # Output JSON
-    json_str = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
-
     if args.output:
+        json_str = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(json_str)
         if args.verbose:
             print(f"  [scraper] Output written to {output_path}", file=sys.stderr)
     else:
+        json_str = json.dumps(result, indent=2) + "\n"
         sys.stdout.write(json_str)
 
 
