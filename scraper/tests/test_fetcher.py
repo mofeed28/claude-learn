@@ -1,13 +1,12 @@
 """Tests for async HTTP fetcher — retry, cache, rate limiting, soft failures."""
 
-import asyncio
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
+import pytest
 
-from scraper.fetcher import Fetcher, FetchResult
 from scraper.config import ScrapeConfig
+from scraper.fetcher import Fetcher
 
 
 @pytest.fixture
@@ -256,11 +255,13 @@ class TestFetchBatch:
         mock_client.get.return_value = make_response(200, "x" * 600)
         fetcher._client = mock_client
 
-        results = await fetcher.fetch_batch([
-            "https://example.com/docs/a",
-            "https://example.com/docs/b",
-            "https://example.com/docs/c",
-        ])
+        results = await fetcher.fetch_batch(
+            [
+                "https://example.com/docs/a",
+                "https://example.com/docs/b",
+                "https://example.com/docs/c",
+            ]
+        )
         assert len(results) == 3
         assert all(r.success for r in results)
         await fetcher.close()
@@ -284,11 +285,13 @@ class TestFetchBatch:
         ]
         fetcher._client = mock_client
 
-        results = await fetcher.fetch_batch([
-            "https://example.com/docs/ok1",
-            "https://example.com/missing",
-            "https://example.com/docs/ok2",
-        ])
+        results = await fetcher.fetch_batch(
+            [
+                "https://example.com/docs/ok1",
+                "https://example.com/missing",
+                "https://example.com/docs/ok2",
+            ]
+        )
         successes = [r for r in results if r.success]
         failures = [r for r in results if not r.success]
         assert len(successes) == 2
@@ -344,6 +347,7 @@ class TestRateLimiting:
         fetcher._client = mock_client
 
         import time
+
         start = time.monotonic()
         await fetcher.fetch_one("https://example.com/docs/a")
         await fetcher.fetch_one("https://example.com/docs/b")
@@ -370,6 +374,7 @@ class TestRateLimiting:
         fetcher._client = mock_client
 
         import time
+
         start = time.monotonic()
         await fetcher.fetch_one("https://a.com/docs/page")
         await fetcher.fetch_one("https://b.com/docs/page")

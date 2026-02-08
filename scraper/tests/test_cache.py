@@ -1,9 +1,8 @@
 """Tests for the file-based page cache."""
 
-import json
 import time
+
 import pytest
-from pathlib import Path
 
 from scraper.cache import PageCache
 
@@ -29,7 +28,6 @@ class TestPageCache:
         cache = PageCache(cache_dir=str(tmp_path), ttl=0)  # expires immediately
         cache.put("https://example.com", "Hello")
         # Need to actually wait a tiny bit for time to advance
-        import time
         time.sleep(0.01)
         assert cache.get("https://example.com") is None
 
@@ -62,4 +60,54 @@ class TestPageCache:
         cache.put("https://a.com", "A")
         assert cache.size == 1
         cache.put("https://b.com", "B")
+        assert cache.size == 2
+
+
+class TestCacheEviction:
+    def test_evict_expired_removes_old_entries(self, tmp_path):
+        cache = PageCache(cache_dir=str(tmp_path), ttl=0)
+        cache.put("https://a.com", "A")
+        cache.put("https://b.com", "B")
+        time.sleep(0.01)
+        cache.evict_expired()
+        assert cache.size == 0
+
+    def test_evict_expired_keeps_fresh_entries(self, tmp_path):
+        cache = PageCache(cache_dir=str(tmp_path), ttl=3600)
+        cache.put("https://a.com", "A")
+        cache.put("https://b.com", "B")
+        cache.evict_expired()
+        assert cache.size == 2
+
+    def test_evict_expired_handles_corrupt_files(self, tmp_path):
+        cache = PageCache(cache_dir=str(tmp_path), ttl=3600)
+        # Write a corrupt JSON file
+        corrupt_path = tmp_path / "corrupt.json"
+        corrupt_path.write_text("not valid json {{{")
+        cache.evict_expired()
+        # Corrupt file should be removed
+        assert not corrupt_path.exists()
+
+    def test_max_entries_evicts_oldest(self, tmp_path):
+        cache = PageCache(cache_dir=str(tmp_path), ttl=3600, max_entries=3)
+        cache.put("https://a.com", "A")
+        time.sleep(0.01)
+        cache.put("https://b.com", "B")
+        time.sleep(0.01)
+        cache.put("https://c.com", "C")
+        time.sleep(0.01)
+        # This should trigger eviction of the oldest entry
+        cache.put("https://d.com", "D")
+        assert cache.size == 3
+        # Oldest entry (a.com) should have been evicted
+        assert cache.get("https://a.com") is None
+        assert cache.get("https://d.com") is not None
+
+    def test_evict_oldest_removes_correct_count(self, tmp_path):
+        cache = PageCache(cache_dir=str(tmp_path), ttl=3600, max_entries=2)
+        cache.put("https://a.com", "A")
+        time.sleep(0.01)
+        cache.put("https://b.com", "B")
+        time.sleep(0.01)
+        cache.put("https://c.com", "C")
         assert cache.size == 2

@@ -16,28 +16,221 @@ import json
 import logging
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
-from .config import ScrapeConfig, SCORE_OFFICIAL_API, SCORE_SITEMAP_DOC, SCORE_OFFICIAL_GUIDE, SCORE_GITHUB_README
-from .queue import URLQueue, ScoredURL
-from .fetcher import Fetcher, FetchResult
-from .extractor import extract_content, content_similarity, ExtractedContent
+from .config import SCORE_OFFICIAL_GUIDE, SCORE_SITEMAP_DOC, ScrapeConfig
 from .discovery import (
-    parse_sitemap_urls, filter_doc_urls, parse_robots_txt,
-    extract_doc_links, find_sitemap_urls, is_disallowed,
-    find_changelog_urls, detect_version, extract_changelog_entries,
+    detect_version,
+    extract_changelog_entries,
+    filter_doc_urls,
+    find_changelog_urls,
+    find_sitemap_urls,
+    is_disallowed,
+    parse_robots_txt,
+    parse_sitemap_urls,
 )
+from .extractor import content_similarity, extract_content
+from .fetcher import Fetcher
+from .queue import URLQueue
 
 log = logging.getLogger("claude-learn-scraper")
 
 
-def _progress(msg: str, verbose: bool):
+def _validate_output_path(path: str) -> Path:
+    """Validate and resolve an output file path (path traversal protection).
+
+    Rejects paths outside the current working directory or user home directory.
+    """
+    resolved = Path(path).resolve()
+    cwd = Path.cwd().resolve()
+    home = Path.home().resolve()
+
+    if not (str(resolved).startswith(str(cwd)) or str(resolved).startswith(str(home))):
+        raise ValueError(f"Output path '{path}' resolves outside cwd and home directory. Resolved to: {resolved}")
+
+    return resolved
+
+
+def _validate_urls(urls: list[str]) -> None:
+    """Validate that all URLs use http or https scheme."""
+    for url in urls:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Invalid URL scheme '{parsed.scheme}' in: {url}. Only http/https allowed.")
+
+
+def _progress(msg: str, verbose: bool) -> None:
     """Print progress to stderr (so stdout stays clean for JSON)."""
     if verbose:
         print(f"  [scraper] {msg}", file=sys.stderr, flush=True)
 
 
-async def run_scraper(topic: str, config: ScrapeConfig, initial_urls: list[str] | None = None, verbose: bool = False) -> dict:
+async def _discover_sitemaps(
+    fetcher: Fetcher,
+    queue: URLQueue,
+    docs_domains: set[str],
+    disallowed_paths: list[str],
+    verbose: bool,
+) -> None:
+    """Phase 1: Discover pages via sitemaps and robots.txt."""
+    for base in docs_domains:
+        _progress(f"Discovering sitemaps for {base}...", verbose)
+        sitemap_candidates = find_sitemap_urls(base)
+        sitemap_results = await fetcher.fetch_batch(sitemap_candidates)
+
+        for result in sitemap_results:
+            if not result.success:
+                continue
+
+            if result.url.endswith("robots.txt"):
+                sitemaps, disallowed = parse_robots_txt(result.content)
+                disallowed_paths.extend(disallowed)
+                _progress(f"  robots.txt: {len(sitemaps)} sitemap(s), {len(disallowed)} disallow rule(s)", verbose)
+                for sm_url in sitemaps:
+                    sm_result = await fetcher.fetch_one(sm_url)
+                    if sm_result.success:
+                        urls = filter_doc_urls(parse_sitemap_urls(sm_result.content))
+                        added = queue.add_many(urls, score=SCORE_SITEMAP_DOC, source="sitemap")
+                        _progress(f"  sitemap {sm_url}: {added} doc URL(s) added", verbose)
+            else:
+                urls = filter_doc_urls(parse_sitemap_urls(result.content))
+                added = queue.add_many(urls, score=SCORE_SITEMAP_DOC, source="sitemap")
+                _progress(f"  {result.url}: {added} doc URL(s) added", verbose)
+
+
+async def _fetch_and_extract(
+    fetcher: Fetcher,
+    queue: URLQueue,
+    config: ScrapeConfig,
+    topic: str,
+    disallowed_paths: list[str],
+    stats: dict,
+    verbose: bool,
+) -> tuple[list[dict], str | None]:
+    """Phase 2: Fetch pages in batches, extract content, detect version."""
+    all_content: list[dict] = []
+    seen_texts: list[str] = []
+    detected_version: str | None = None
+    batch_num = 0
+
+    while queue.pending_count > 0 and len(all_content) < config.max_urls:
+        batch = queue.get_batch(size=config.concurrency)
+        if not batch:
+            break
+
+        batch_num += 1
+        urls_to_fetch = []
+        for entry in batch:
+            if is_disallowed(entry.url, disallowed_paths):
+                stats["urls_skipped_disallowed"] += 1
+            else:
+                urls_to_fetch.append(entry.url)
+
+        if not urls_to_fetch:
+            queue.mark_batch_fetched(batch)
+            continue
+
+        _progress(f"Batch {batch_num}: fetching {len(urls_to_fetch)} URL(s)...", verbose)
+        results = await fetcher.fetch_batch(urls_to_fetch)
+        queue.mark_batch_fetched(batch)
+
+        for result in results:
+            stats["urls_fetched"] += 1
+
+            if result.from_cache:
+                stats["urls_cached"] += 1
+
+            if not result.success:
+                if result.error == "soft_failure":
+                    stats["soft_failures"] += 1
+                    _progress(f"  SOFT FAIL: {result.url}", verbose)
+                else:
+                    stats["urls_failed"] += 1
+                    _progress(f"  FAILED: {result.url} ({result.error})", verbose)
+                continue
+
+            extracted = extract_content(result.content, base_url=result.url)
+
+            # Dedup: skip if >90% similar to already-seen content
+            is_dup = False
+            for seen in seen_texts:
+                if content_similarity(extracted.text, seen) > 0.9:
+                    is_dup = True
+                    break
+
+            if is_dup:
+                stats["urls_skipped_dedup"] += 1
+                _progress(f"  DEDUP: {result.url}", verbose)
+                continue
+
+            seen_texts.append(extracted.text[:5000])
+
+            # Version detection from page content
+            if not detected_version:
+                detected_version = detect_version(extracted.text, topic)
+                if detected_version:
+                    _progress(f"  Detected version: {detected_version}", verbose)
+
+            cache_label = " (cached)" if result.from_cache else ""
+            blocks = len(extracted.code_blocks)
+            _progress(f"  OK: {result.url} ({extracted.word_count} words, {blocks} code blocks){cache_label}", verbose)
+
+            all_content.append(
+                {
+                    "url": result.url,
+                    "title": extracted.title,
+                    "text": extracted.text[:50000],
+                    "code_blocks": extracted.code_blocks[:50],
+                    "headings": extracted.headings[:100],
+                    "tables": extracted.tables[:30],
+                    "word_count": extracted.word_count,
+                    "from_cache": result.from_cache,
+                    "fetch_time_ms": result.fetch_time_ms,
+                }
+            )
+
+            # Link crawling (depth-1)
+            for link in extracted.links:
+                queue.add(link, score=SCORE_OFFICIAL_GUIDE, source=f"crawled:{result.url}", depth=1)
+
+    return all_content, detected_version
+
+
+async def _discover_changelog(
+    fetcher: Fetcher,
+    docs_domains: set[str],
+    topic: str,
+    detected_version: str | None,
+    verbose: bool,
+) -> tuple[list[dict], str | None]:
+    """Phase 3: Look for changelogs in known locations."""
+    changelog_entries: list[dict] = []
+    _progress("Checking for changelogs...", verbose)
+
+    for base in docs_domains:
+        changelog_candidates = find_changelog_urls(base, topic)
+        for url in changelog_candidates[:4]:  # limit probes
+            result = await fetcher.fetch_one(url)
+            if result.success and len(result.content) > 200:
+                extracted = extract_content(result.content, base_url=url)
+                entries = extract_changelog_entries(extracted.text)
+                if entries:
+                    changelog_entries = entries
+                    if not detected_version and entries:
+                        detected_version = entries[0]["version"]
+                    _progress(f"  Found changelog: {url} ({len(entries)} entries)", verbose)
+                    break
+
+    return changelog_entries, detected_version
+
+
+async def run_scraper(
+    topic: str,
+    config: ScrapeConfig,
+    initial_urls: list[str] | None = None,
+    verbose: bool = False,
+) -> dict:
     """Run the full scraping pipeline for a topic.
 
     Returns a structured dict with all scraped content.
@@ -45,10 +238,7 @@ async def run_scraper(topic: str, config: ScrapeConfig, initial_urls: list[str] 
     start_time = time.monotonic()
     queue = URLQueue(max_size=config.max_urls)
     fetcher = Fetcher(config)
-    all_content: list[dict] = []
     disallowed_paths: list[str] = []
-    detected_version: str | None = None
-    changelog_entries: list[dict] = []
     stats = {
         "urls_discovered": 0,
         "urls_fetched": 0,
@@ -66,140 +256,40 @@ async def run_scraper(topic: str, config: ScrapeConfig, initial_urls: list[str] 
                 queue.add(url, source="initial")
             _progress(f"Seeded queue with {len(initial_urls)} URL(s)", verbose)
 
-        # Phase 1: Sitemap & robots.txt discovery
-        docs_domains = set()
-        for url in (initial_urls or []):
+        # Collect unique domains from initial URLs
+        docs_domains: set[str] = set()
+        for url in initial_urls or []:
             parsed = urlparse(url)
             if parsed.netloc:
                 docs_domains.add(f"{parsed.scheme}://{parsed.netloc}")
 
-        for base in docs_domains:
-            _progress(f"Discovering sitemaps for {base}...", verbose)
-            sitemap_candidates = find_sitemap_urls(base)
-            sitemap_results = await fetcher.fetch_batch(sitemap_candidates)
-
-            for result in sitemap_results:
-                if not result.success:
-                    continue
-
-                if result.url.endswith("robots.txt"):
-                    sitemaps, disallowed = parse_robots_txt(result.content)
-                    disallowed_paths.extend(disallowed)
-                    _progress(f"  robots.txt: {len(sitemaps)} sitemap(s), {len(disallowed)} disallow rule(s)", verbose)
-                    for sm_url in sitemaps:
-                        sm_result = await fetcher.fetch_one(sm_url)
-                        if sm_result.success:
-                            urls = filter_doc_urls(parse_sitemap_urls(sm_result.content))
-                            added = queue.add_many(urls, score=SCORE_SITEMAP_DOC, source="sitemap")
-                            _progress(f"  sitemap {sm_url}: {added} doc URL(s) added", verbose)
-                else:
-                    urls = filter_doc_urls(parse_sitemap_urls(result.content))
-                    added = queue.add_many(urls, score=SCORE_SITEMAP_DOC, source="sitemap")
-                    _progress(f"  {result.url}: {added} doc URL(s) added", verbose)
-
+        # Phase 1: Sitemap & robots.txt discovery
+        await _discover_sitemaps(fetcher, queue, docs_domains, disallowed_paths, verbose)
         stats["urls_discovered"] = queue.total_count
         _progress(f"Discovery complete: {queue.total_count} URL(s) in queue", verbose)
 
         # Phase 2: Fetch pages in batches
-        seen_texts: list[str] = []
-        batch_num = 0
-
-        while queue.pending_count > 0 and len(all_content) < config.max_urls:
-            batch = queue.get_batch(size=config.concurrency)
-            if not batch:
-                break
-
-            batch_num += 1
-            urls_to_fetch = []
-            for entry in batch:
-                if is_disallowed(entry.url, disallowed_paths):
-                    stats["urls_skipped_disallowed"] += 1
-                else:
-                    urls_to_fetch.append(entry.url)
-
-            if not urls_to_fetch:
-                queue.mark_batch_fetched(batch)
-                continue
-
-            _progress(f"Batch {batch_num}: fetching {len(urls_to_fetch)} URL(s)...", verbose)
-            results = await fetcher.fetch_batch(urls_to_fetch)
-            queue.mark_batch_fetched(batch)
-
-            for result in results:
-                stats["urls_fetched"] += 1
-
-                if result.from_cache:
-                    stats["urls_cached"] += 1
-
-                if not result.success:
-                    if result.error == "soft_failure":
-                        stats["soft_failures"] += 1
-                        _progress(f"  SOFT FAIL: {result.url}", verbose)
-                    else:
-                        stats["urls_failed"] += 1
-                        _progress(f"  FAILED: {result.url} ({result.error})", verbose)
-                    continue
-
-                extracted = extract_content(result.content, base_url=result.url)
-
-                # Dedup: skip if >90% similar to already-seen content
-                is_dup = False
-                for seen in seen_texts:
-                    if content_similarity(extracted.text, seen) > 0.9:
-                        is_dup = True
-                        break
-
-                if is_dup:
-                    stats["urls_skipped_dedup"] += 1
-                    _progress(f"  DEDUP: {result.url}", verbose)
-                    continue
-
-                seen_texts.append(extracted.text[:5000])
-
-                # Version detection from page content
-                if not detected_version:
-                    detected_version = detect_version(extracted.text, topic)
-                    if detected_version:
-                        _progress(f"  Detected version: {detected_version}", verbose)
-
-                cache_label = " (cached)" if result.from_cache else ""
-                _progress(f"  OK: {result.url} ({extracted.word_count} words, {len(extracted.code_blocks)} code blocks){cache_label}", verbose)
-
-                all_content.append({
-                    "url": result.url,
-                    "title": extracted.title,
-                    "text": extracted.text[:50000],
-                    "code_blocks": extracted.code_blocks[:50],
-                    "headings": extracted.headings[:100],
-                    "tables": extracted.tables[:30],
-                    "word_count": extracted.word_count,
-                    "from_cache": result.from_cache,
-                    "fetch_time_ms": result.fetch_time_ms,
-                })
-
-                # Link crawling (depth-1)
-                for link in extracted.links:
-                    queue.add(link, score=SCORE_OFFICIAL_GUIDE, source=f"crawled:{result.url}", depth=1)
+        all_content, detected_version = await _fetch_and_extract(
+            fetcher,
+            queue,
+            config,
+            topic,
+            disallowed_paths,
+            stats,
+            verbose,
+        )
 
         # Phase 3: Changelog discovery
-        _progress("Checking for changelogs...", verbose)
-        for base in docs_domains:
-            changelog_candidates = find_changelog_urls(base, topic)
-            for url in changelog_candidates[:4]:  # limit probes
-                result = await fetcher.fetch_one(url)
-                if result.success and len(result.content) > 200:
-                    extracted = extract_content(result.content, base_url=url)
-                    entries = extract_changelog_entries(extracted.text)
-                    if entries:
-                        changelog_entries = entries
-                        if not detected_version and entries:
-                            detected_version = entries[0]["version"]
-                        _progress(f"  Found changelog: {url} ({len(entries)} entries)", verbose)
-                        break
+        changelog_entries, detected_version = await _discover_changelog(
+            fetcher,
+            docs_domains,
+            topic,
+            detected_version,
+            verbose,
+        )
 
         stats["urls_discovered"] = queue.total_count
         elapsed = time.monotonic() - start_time
-
         _progress(f"Done: {len(all_content)} pages in {elapsed:.1f}s", verbose)
 
         return {
@@ -228,39 +318,72 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("topic", help="Technology/library to scrape docs for")
     parser.add_argument(
-        "--mode", choices=["quick", "default", "deep"], default="default",
+        "--mode",
+        choices=["quick", "default", "deep"],
+        default="default",
         help="Scraping depth mode (default: default)",
     )
     parser.add_argument(
-        "--urls", nargs="*", default=[],
+        "--urls",
+        nargs="*",
+        default=[],
         help="Initial URLs to seed the scraper with",
     )
     parser.add_argument(
-        "--cache-dir", default="~/.cache/claude-learn",
+        "--cache-dir",
+        default="~/.cache/claude-learn",
         help="Cache directory (default: ~/.cache/claude-learn)",
     )
     parser.add_argument(
-        "--no-cache", action="store_true",
+        "--no-cache",
+        action="store_true",
         help="Disable caching",
     )
     parser.add_argument(
-        "--timeout", type=float, default=15.0,
+        "--timeout",
+        type=float,
+        default=15.0,
         help="Request timeout in seconds (default: 15)",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true",
+        "--verbose",
+        "-v",
+        action="store_true",
         help="Print progress to stderr",
     )
     parser.add_argument(
-        "--output", "-o", type=str, default=None,
+        "--output",
+        "-o",
+        type=str,
+        default=None,
         help="Write JSON output to file instead of stdout",
     )
     return parser
 
 
-def main():
+def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # Input validation
+    if not args.topic.strip():
+        parser.error("Topic must be non-empty")
+
+    if args.timeout <= 0 or args.timeout > 300:
+        parser.error("Timeout must be between 0 and 300 seconds")
+
+    if args.urls:
+        try:
+            _validate_urls(args.urls)
+        except ValueError as e:
+            parser.error(str(e))
+
+    # Output path validation
+    if args.output:
+        try:
+            output_path = _validate_output_path(args.output)
+        except ValueError as e:
+            parser.error(str(e))
 
     config = ScrapeConfig(
         mode=args.mode,
@@ -274,21 +397,23 @@ def main():
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
 
-    result = asyncio.run(run_scraper(
-        topic=args.topic,
-        config=config,
-        initial_urls=args.urls or [],
-        verbose=args.verbose,
-    ))
+    result = asyncio.run(
+        run_scraper(
+            topic=args.topic,
+            config=config,
+            initial_urls=args.urls or [],
+            verbose=args.verbose,
+        )
+    )
 
     # Output JSON
     json_str = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
 
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(json_str)
         if args.verbose:
-            print(f"  [scraper] Output written to {args.output}", file=sys.stderr)
+            print(f"  [scraper] Output written to {output_path}", file=sys.stderr)
     else:
         sys.stdout.write(json_str)
 

@@ -1,6 +1,8 @@
 """Configuration and constants for the scraper."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
 
 
 @dataclass
@@ -42,7 +44,24 @@ class ScrapeConfig:
     use_playwright: bool = False
     playwright_timeout: int = 15000  # ms
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        # Validate configuration
+        if self.mode not in ("quick", "default", "deep"):
+            raise ValueError(f"Invalid mode: {self.mode!r}. Must be 'quick', 'default', or 'deep'.")
+        if self.request_timeout <= 0 or self.request_timeout > 300:
+            raise ValueError(f"Invalid timeout: {self.request_timeout}. Must be between 0 and 300.")
+        if self.concurrency < 1 or self.concurrency > 50:
+            raise ValueError(f"Invalid concurrency: {self.concurrency}. Must be between 1 and 50.")
+        if self.max_retries < 1 or self.max_retries > 10:
+            raise ValueError(f"Invalid max_retries: {self.max_retries}. Must be between 1 and 10.")
+
+        # Set version-aware user agent
+        from scraper import __version__
+
+        if self.user_agent == "claude-learn-scraper/0.1":
+            self.user_agent = f"claude-learn-scraper/{__version__}"
+
+        # Mode-based adjustments
         if self.mode == "quick":
             self.max_urls = 5
             self.concurrency = 3
@@ -65,21 +84,43 @@ SCORE_UNKNOWN = 1
 
 # Patterns for doc URLs
 DOC_PATH_PATTERNS = [
-    "/docs/", "/api/", "/guide/", "/reference/",
-    "/tutorial/", "/getting-started/", "/handbook/",
-    "/manual/", "/learn/", "/quickstart/",
+    "/docs/",
+    "/api/",
+    "/guide/",
+    "/reference/",
+    "/tutorial/",
+    "/getting-started/",
+    "/handbook/",
+    "/manual/",
+    "/learn/",
+    "/quickstart/",
 ]
 
 # Patterns to skip
 SKIP_PATH_PATTERNS = [
-    "/blog/", "/pricing/", "/login/", "/signup/",
-    "/careers/", "/about/", "/contact/", "/legal/",
-    "/privacy/", "/terms/", "/press/", "/news/",
+    "/blog/",
+    "/pricing/",
+    "/login/",
+    "/signup/",
+    "/careers/",
+    "/about/",
+    "/contact/",
+    "/legal/",
+    "/privacy/",
+    "/terms/",
+    "/press/",
+    "/news/",
 ]
 
 # Soft failure signals
 SOFT_FAILURE_SIGNALS = [
-    "sign in", "access denied", "log in to continue",
-    "enable javascript", "403 forbidden", "404 not found",
-    "page not found", "unauthorized", "please log in",
+    "sign in",
+    "access denied",
+    "log in to continue",
+    "enable javascript",
+    "403 forbidden",
+    "404 not found",
+    "page not found",
+    "unauthorized",
+    "please log in",
 ]

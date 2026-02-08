@@ -5,11 +5,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from typing import ClassVar
 
 
 @dataclass
 class ExtractedContent:
     """Extracted content from a page."""
+
     title: str = ""
     text: str = ""
     code_blocks: list[str] = field(default_factory=list)
@@ -23,22 +25,54 @@ class _TagStripper(HTMLParser):
     """Simple HTML to text converter that preserves structure."""
 
     # Tags that typically contain navigation/boilerplate
-    SKIP_TAGS = {
-        "nav", "header", "footer", "aside", "script", "style",
-        "noscript", "svg", "iframe", "form",
+    SKIP_TAGS: ClassVar[set[str]] = {
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "iframe",
+        "form",
     }
     # Tags whose classes suggest navigation
-    SKIP_CLASSES = {
-        "nav", "navbar", "sidebar", "footer", "header",
-        "menu", "breadcrumb", "pagination", "cookie",
-        "banner", "ad", "advertisement",
+    SKIP_CLASSES: ClassVar[set[str]] = {
+        "nav",
+        "navbar",
+        "sidebar",
+        "footer",
+        "header",
+        "menu",
+        "breadcrumb",
+        "pagination",
+        "cookie",
+        "banner",
+        "ad",
+        "advertisement",
     }
-    BLOCK_TAGS = {
-        "p", "div", "section", "article", "main", "h1", "h2", "h3",
-        "h4", "h5", "h6", "li", "tr", "blockquote", "pre", "br", "hr",
+    BLOCK_TAGS: ClassVar[set[str]] = {
+        "p",
+        "div",
+        "section",
+        "article",
+        "main",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "tr",
+        "blockquote",
+        "pre",
+        "br",
+        "hr",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.output: list[str] = []
         self.headings: list[str] = []
@@ -52,7 +86,7 @@ class _TagStripper(HTMLParser):
         self._heading_buffer: list[str] = []
         self._in_heading = False
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = dict(attrs)
         classes = (attr_dict.get("class") or "").lower().split()
 
@@ -87,7 +121,7 @@ class _TagStripper(HTMLParser):
         if tag in self.BLOCK_TAGS:
             self.output.append("\n")
 
-    def handle_endtag(self, tag: str):
+    def handle_endtag(self, tag: str) -> None:
         # Check if this closing tag matches a skip-triggering open tag
         if self._skip_stack and tag == self._skip_stack[-1]:
             self._skip_stack.pop()
@@ -112,7 +146,7 @@ class _TagStripper(HTMLParser):
         if tag in self.BLOCK_TAGS:
             self.output.append("\n")
 
-    def handle_data(self, data: str):
+    def handle_data(self, data: str) -> None:
         if self._skip_depth > 0:
             return
 
@@ -153,6 +187,7 @@ def extract_content(html: str, base_url: str = "") -> ExtractedContent:
     # Resolve relative links
     if base_url:
         from urllib.parse import urljoin
+
         links = [urljoin(base_url, link) for link in stripper.links]
     else:
         links = stripper.links

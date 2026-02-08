@@ -2,30 +2,37 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+from dataclasses import dataclass
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from .config import (
-    SCORE_OFFICIAL_API, SCORE_SITEMAP_DOC, SCORE_OFFICIAL_GUIDE,
-    SCORE_GITHUB_README, SCORE_REGISTRY, SCORE_WIKI, SCORE_BLOG,
-    SCORE_STACKOVERFLOW, SCORE_WAYBACK, SCORE_UNKNOWN,
-    DOC_PATH_PATTERNS, SKIP_PATH_PATTERNS,
+    DOC_PATH_PATTERNS,
+    SCORE_BLOG,
+    SCORE_GITHUB_README,
+    SCORE_OFFICIAL_API,
+    SCORE_OFFICIAL_GUIDE,
+    SCORE_REGISTRY,
+    SCORE_STACKOVERFLOW,
+    SCORE_UNKNOWN,
+    SCORE_WAYBACK,
+    SCORE_WIKI,
+    SKIP_PATH_PATTERNS,
 )
 
 
 @dataclass
 class ScoredURL:
     """A URL with a priority score and metadata."""
+
     url: str
     score: int
     source: str = ""  # where we found this URL
-    depth: int = 0    # 0 = from search, 1 = from link crawling
+    depth: int = 0  # 0 = from search, 1 = from link crawling
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.url)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, ScoredURL):
             return self.url == other.url
         return False
@@ -33,8 +40,17 @@ class ScoredURL:
 
 # Tracking params to strip during normalization
 _TRACKING_PARAMS = {
-    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    "ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "ref",
+    "source",
+    "fbclid",
+    "gclid",
+    "mc_cid",
+    "mc_eid",
 }
 
 
@@ -51,6 +67,12 @@ def normalize_url(url: str) -> str:
     # Lowercase scheme and netloc
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
+
+    # Strip default ports
+    if scheme == "https" and netloc.endswith(":443"):
+        netloc = netloc[:-4]
+    elif scheme == "http" and netloc.endswith(":80"):
+        netloc = netloc[:-3]
 
     # Strip trailing slash from path (but keep root /)
     path = parsed.path.rstrip("/") or "/"
@@ -88,10 +110,17 @@ def score_url(url: str) -> int:
         return SCORE_WIKI
 
     # Package registries
-    if any(reg in domain for reg in [
-        "npmjs.com", "pypi.org", "crates.io", "pkg.go.dev",
-        "rubygems.org", "hex.pm",
-    ]):
+    if any(
+        reg in domain
+        for reg in [
+            "npmjs.com",
+            "pypi.org",
+            "crates.io",
+            "pkg.go.dev",
+            "rubygems.org",
+            "hex.pm",
+        ]
+    ):
         return SCORE_REGISTRY
 
     # Blog/tutorial sources
@@ -132,10 +161,8 @@ def should_skip_url(url: str) -> bool:
         return True
 
     # Skip file downloads
-    if any(path.endswith(ext) for ext in [".zip", ".tar.gz", ".exe", ".dmg", ".png", ".jpg", ".gif", ".svg", ".ico"]):
-        return True
-
-    return False
+    skip_exts = [".zip", ".tar.gz", ".exe", ".dmg", ".png", ".jpg", ".gif", ".svg", ".ico"]
+    return any(path.endswith(ext) for ext in skip_exts)
 
 
 class URLQueue:
@@ -176,7 +203,7 @@ class URLQueue:
         """Add multiple URLs. Returns count of new URLs added."""
         return sum(1 for url in urls if self.add(url, score, source, depth))
 
-    def mark_fetched(self, url: str):
+    def mark_fetched(self, url: str) -> None:
         """Mark a URL as fetched so it won't be re-added."""
         normalized = normalize_url(url)
         self._fetched.add(normalized)
@@ -188,10 +215,7 @@ class URLQueue:
         Returns up to `size` URLs, sorted by score (highest first),
         then by path length (shorter = more important).
         """
-        remaining = [
-            entry for norm_url, entry in self._urls.items()
-            if norm_url not in self._fetched
-        ]
+        remaining = [entry for norm_url, entry in self._urls.items() if norm_url not in self._fetched]
 
         # Sort: highest score first, then shortest path
         remaining.sort(key=lambda e: (-e.score, len(urlparse(e.url).path)))
@@ -200,7 +224,7 @@ class URLQueue:
 
         return batch
 
-    def mark_batch_fetched(self, batch: list[ScoredURL]):
+    def mark_batch_fetched(self, batch: list[ScoredURL]) -> None:
         """Mark all URLs in a batch as fetched."""
         for entry in batch:
             self.mark_fetched(entry.url)
@@ -208,10 +232,7 @@ class URLQueue:
     @property
     def pending_count(self) -> int:
         """Number of URLs not yet fetched."""
-        return len([
-            u for u in self._urls
-            if u not in self._fetched
-        ])
+        return len([u for u in self._urls if u not in self._fetched])
 
     @property
     def fetched_count(self) -> int:
@@ -223,9 +244,6 @@ class URLQueue:
 
     def get_all_sorted(self) -> list[ScoredURL]:
         """Get all pending URLs sorted by priority."""
-        remaining = [
-            entry for norm_url, entry in self._urls.items()
-            if norm_url not in self._fetched
-        ]
+        remaining = [entry for norm_url, entry in self._urls.items() if norm_url not in self._fetched]
         remaining.sort(key=lambda e: (-e.score, len(urlparse(e.url).path)))
-        return remaining[:self.max_size]
+        return remaining[: self.max_size]

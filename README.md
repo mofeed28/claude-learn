@@ -1,5 +1,7 @@
 # /learn for Claude Code
 
+[![CI](https://github.com/mofeed28/claude-learn/actions/workflows/ci.yml/badge.svg)](https://github.com/mofeed28/claude-learn/actions/workflows/ci.yml)
+
 **Teach your Claude Code agent any technology in seconds. No API keys. No subscriptions. Free.**
 
 ```
@@ -383,8 +385,11 @@ The scraper is **completely optional** — `/learn` works fine without it using 
 # Test it works
 python -m scraper "hono" --mode quick --urls https://hono.dev/docs
 
-# Run tests (64 tests)
+# Run tests
 python -m pytest scraper/tests/ -v
+
+# Run with coverage
+python -m pytest scraper/tests/ -v --cov=scraper --cov-report=term-missing
 ```
 
 ---
@@ -404,11 +409,19 @@ Being honest about what a free solution can't do:
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
+
 PRs welcome. Some ideas:
 
 - [ ] Skill sharing — export/import skills between users
 - [ ] Community skill registry
 - [ ] Auto-update scheduler
+
+---
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 ---
 

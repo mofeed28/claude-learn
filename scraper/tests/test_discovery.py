@@ -1,10 +1,15 @@
 """Tests for sitemap parsing and link discovery."""
 
-import pytest
 from scraper.discovery import (
-    parse_sitemap_urls, filter_doc_urls, parse_robots_txt,
-    is_disallowed, extract_doc_links, find_sitemap_urls,
-    find_changelog_urls, detect_version, extract_changelog_entries,
+    detect_version,
+    extract_changelog_entries,
+    extract_doc_links,
+    filter_doc_urls,
+    find_changelog_urls,
+    find_sitemap_urls,
+    is_disallowed,
+    parse_robots_txt,
+    parse_sitemap_urls,
 )
 
 
@@ -172,7 +177,7 @@ Disallow: /google-only/
 User-agent: *
 Disallow: /private/
 """
-        sitemaps, disallowed = parse_robots_txt(content)
+        _sitemaps, disallowed = parse_robots_txt(content)
         # Should only include /private/ (from User-agent: *)
         assert "/private/" in disallowed
         assert "/google-only/" not in disallowed

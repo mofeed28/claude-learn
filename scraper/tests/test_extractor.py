@@ -1,7 +1,6 @@
 """Tests for HTML content extraction."""
 
-import pytest
-from scraper.extractor import extract_content, content_similarity
+from scraper.extractor import content_similarity, extract_content
 
 
 class TestExtractContent:

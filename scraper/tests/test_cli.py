@@ -1,8 +1,8 @@
 """Tests for CLI entry point — argument parsing, config wiring, output format."""
 
-import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 
 from scraper.cli import build_parser, main, run_scraper
 from scraper.config import ScrapeConfig
@@ -118,7 +118,13 @@ class TestMainWiring:
     @patch("scraper.cli.sys")
     def test_main_creates_config_from_args(self, mock_sys, mock_json, mock_asyncio):
         """main() should create a ScrapeConfig matching CLI args."""
-        mock_asyncio.run.return_value = {"topic": "hono", "pages": [], "stats": {}, "urls_fetched": []}
+
+        # Consume the coroutine to avoid RuntimeWarning
+        def consume_coro(coro):
+            coro.close()
+            return {"topic": "hono", "pages": [], "stats": {}, "urls_fetched": []}
+
+        mock_asyncio.run.side_effect = consume_coro
 
         with patch("scraper.cli.build_parser") as mock_parser_fn:
             mock_parser = MagicMock()
@@ -159,7 +165,6 @@ class TestMainWiring:
             mock_parser_fn.return_value = mock_parser
 
             # Capture the config that gets created
-            original_run_scraper = run_scraper
             captured_configs = []
 
             async def mock_run(topic, config, initial_urls=None, verbose=False):
@@ -170,6 +175,7 @@ class TestMainWiring:
                 # asyncio.run should call the coroutine
                 def run_coro(coro):
                     import asyncio
+
                     loop = asyncio.new_event_loop()
                     try:
                         return loop.run_until_complete(coro)
@@ -185,15 +191,31 @@ class TestMainWiring:
     @patch("scraper.cli.asyncio")
     @patch("scraper.cli.sys")
     def test_main_outputs_json_to_stdout(self, mock_sys, mock_asyncio):
-        result_data = {"topic": "test", "pages": [{"url": "https://test.com"}], "stats": {"pages_extracted": 1}, "urls_fetched": ["https://test.com"]}
-        mock_asyncio.run.return_value = result_data
+        result_data = {
+            "topic": "test",
+            "pages": [{"url": "https://test.com"}],
+            "stats": {"pages_extracted": 1},
+            "urls_fetched": ["https://test.com"],
+        }
+
+        def consume_coro(coro):
+            coro.close()
+            return result_data
+
+        mock_asyncio.run.side_effect = consume_coro
         mock_sys.stdout = MagicMock()
 
         with patch("scraper.cli.build_parser") as mock_parser_fn:
             mock_parser = MagicMock()
             mock_parser.parse_args.return_value = MagicMock(
-                topic="test", mode="default", urls=[], cache_dir="~/.cache/test",
-                no_cache=False, timeout=15.0, verbose=False, output=None,
+                topic="test",
+                mode="default",
+                urls=[],
+                cache_dir="~/.cache/test",
+                no_cache=False,
+                timeout=15.0,
+                verbose=False,
+                output=None,
             )
             mock_parser_fn.return_value = mock_parser
             main()

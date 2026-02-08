@@ -1,6 +1,7 @@
 """Tests for URL queue with scoring and deduplication."""
 
 import pytest
+
 from scraper.queue import URLQueue, normalize_url, score_url, should_skip_url
 
 
@@ -129,10 +130,57 @@ class TestURLQueue:
 
     def test_add_many(self):
         q = URLQueue()
-        count = q.add_many([
-            "https://a.com/docs",
-            "https://b.com/docs",
-            "https://a.com/docs",  # dup
-            "https://c.com/blog/post",  # skip
-        ], score=4)
+        count = q.add_many(
+            [
+                "https://a.com/docs",
+                "https://b.com/docs",
+                "https://a.com/docs",  # dup
+                "https://c.com/blog/post",  # skip
+            ],
+            score=4,
+        )
         assert count == 2
+
+
+class TestNormalizeURLParametrized:
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("https://example.com:443/docs", "https://example.com/docs"),
+            ("http://example.com:80/docs", "http://example.com/docs"),
+            ("https://example.com:8080/docs", "https://example.com:8080/docs"),
+            ("http://example.com:3000/api", "http://example.com:3000/api"),
+        ],
+    )
+    def test_port_normalization(self, url, expected):
+        assert normalize_url(url) == expected
+
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("https://DOCS.STRIPE.COM/api", "https://docs.stripe.com/api"),
+            ("HTTPS://Example.Com/PATH", "https://example.com/PATH"),
+        ],
+    )
+    def test_case_normalization(self, url, expected):
+        assert normalize_url(url) == expected
+
+
+class TestScoreURLParametrized:
+    @pytest.mark.parametrize(
+        "url,expected_score",
+        [
+            ("https://docs.stripe.com/api/charges", 5),
+            ("https://docs.stripe.com/reference/v1", 5),
+            ("https://docs.stripe.com/docs/getting-started", 4),
+            ("https://docs.stripe.com/guide/quickstart", 4),
+            ("https://raw.githubusercontent.com/stripe/stripe-node/main/README.md", 4),
+            ("https://www.npmjs.com/package/stripe", 3),
+            ("https://pypi.org/project/stripe", 3),
+            ("https://dev.to/stripe/intro", 2),
+            ("https://stackoverflow.com/questions/12345", 2),
+            ("https://web.archive.org/web/2024/https://stripe.com", 1),
+        ],
+    )
+    def test_url_scoring(self, url, expected_score):
+        assert score_url(url) == expected_score

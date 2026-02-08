@@ -1,15 +1,13 @@
 """Integration tests — full pipeline with mocked HTTP responses."""
 
 import json
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
 from scraper.cli import run_scraper
 from scraper.config import ScrapeConfig
-from scraper.fetcher import FetchResult
-
 
 # --- Fake page content ---
 
@@ -38,7 +36,8 @@ DOC_PAGE_GETTING_STARTED = """
 <nav class="navbar">Navigation stuff to skip</nav>
 <main>
 <h1>Getting Started with ExampleLib</h1>
-<p>ExampleLib is a powerful library for building things quickly and efficiently with minimal configuration needed for production deployments.</p>
+<p>ExampleLib is a powerful library for building things quickly
+and efficiently with minimal configuration needed.</p>
 <h2>Installation</h2>
 <pre><code>npm install examplelib</code></pre>
 <h2>Quick Start</h2>
@@ -49,7 +48,7 @@ const app = new ExampleLib();
 app.configure({ debug: true });
 app.start();
 </code></pre>
-<p>Now you have a running ExampleLib instance ready for development and testing purposes in your local environment setup.</p>
+<p>Now you have a running ExampleLib instance ready for development and testing.</p>
 <a href="/docs/api-reference">API Reference</a>
 <a href="/docs/configuration">Configuration Guide</a>
 <a href="/pricing">Pricing</a>
@@ -66,7 +65,7 @@ DOC_PAGE_API = """
 <main>
 <h1>API Reference</h1>
 <h2>ExampleLib.configure(options)</h2>
-<p>Configure your ExampleLib instance with various options for production and development environments. This is a comprehensive API.</p>
+<p>Configure your ExampleLib instance with various options for environments.</p>
 <table>
 <tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>
 <tr><td>debug</td><td>boolean</td><td>false</td><td>Enable debug mode</td></tr>
@@ -92,7 +91,7 @@ DOC_PAGE_CONFIG = """
 <body>
 <main>
 <h1>Configuration Guide</h1>
-<p>ExampleLib supports file-based and environment variable configuration for production and development environments with many options.</p>
+<p>ExampleLib supports file-based and env var configuration for environments.</p>
 <h2>Config File</h2>
 <pre><code>
 // examplelib.config.js
@@ -105,7 +104,7 @@ export default {
 };
 </code></pre>
 <h2>Environment Variables</h2>
-<p>Set EXAMPLELIB_PORT and EXAMPLELIB_DB_HOST to override config file values in your deployment environment for various setups.</p>
+<p>Set EXAMPLELIB_PORT and EXAMPLELIB_DB_HOST to override config values.</p>
 </main>
 </body>
 </html>
@@ -157,10 +156,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",
@@ -183,10 +182,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",
@@ -217,10 +216,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             await run_scraper(
                 "examplelib",
@@ -249,10 +248,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",
@@ -275,10 +274,10 @@ class TestFullPipeline:
         async def mock_get(url, **kwargs):
             return make_mock_response(url, 500, "Internal Server Error")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "broken-lib",
@@ -300,10 +299,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",
@@ -326,10 +325,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             # First run populates cache
             result1 = await run_scraper(
@@ -358,10 +357,10 @@ class TestFullPipeline:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",
@@ -379,9 +378,9 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_no_initial_urls(self, config):
         """Running with no seed URLs should return empty results."""
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper("nothing", config, initial_urls=[])
 
@@ -399,10 +398,10 @@ class TestEdgeCases:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",
@@ -426,10 +425,10 @@ class TestEdgeCases:
                 return make_mock_response(url, status, text)
             return make_mock_response(url, 404, "Not Found")
 
-        with patch("scraper.fetcher.httpx.AsyncClient") as MockClient:
+        with patch("scraper.fetcher.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get.side_effect = mock_get
-            MockClient.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             result = await run_scraper(
                 "examplelib",

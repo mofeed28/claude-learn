@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urljoin, urlparse
 
 from .config import DOC_PATH_PATTERNS, SKIP_PATH_PATTERNS
 
@@ -146,9 +146,9 @@ def extract_doc_links(html: str, base_url: str) -> list[str]:
             continue
 
         # Prefer doc-like paths but include any same-domain HTML page
-        if any(p in path for p in DOC_PATH_PATTERNS):
-            doc_links.append(full_url)
-        elif path.endswith((".html", ".htm", "/")) or "." not in path.split("/")[-1]:
+        is_doc = any(p in path for p in DOC_PATH_PATTERNS)
+        is_html = path.endswith((".html", ".htm", "/")) or "." not in path.split("/")[-1]
+        if is_doc or is_html:
             doc_links.append(full_url)
 
     return doc_links
@@ -193,11 +193,13 @@ def find_changelog_urls(base_url: str, topic: str) -> list[str]:
         path_parts = parsed.path.strip("/").split("/")
         if len(path_parts) >= 2:
             repo_path = "/".join(path_parts[:2])
-            candidates.extend([
-                f"{origin}/{repo_path}/releases",
-                f"{origin}/{repo_path}/blob/main/CHANGELOG.md",
-                f"{origin}/{repo_path}/blob/master/CHANGELOG.md",
-            ])
+            candidates.extend(
+                [
+                    f"{origin}/{repo_path}/releases",
+                    f"{origin}/{repo_path}/blob/main/CHANGELOG.md",
+                    f"{origin}/{repo_path}/blob/master/CHANGELOG.md",
+                ]
+            )
 
     return candidates
 
@@ -282,10 +284,12 @@ def extract_changelog_entries(text: str, limit: int = 5) -> list[dict]:
         summary_lines = summary_text.split("\n")[:5]
         summary = "\n".join(line.strip() for line in summary_lines if line.strip())
 
-        entries.append({
-            "version": version,
-            "date": date,
-            "summary": summary[:300],
-        })
+        entries.append(
+            {
+                "version": version,
+                "date": date,
+                "summary": summary[:300],
+            }
+        )
 
     return entries
