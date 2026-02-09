@@ -358,7 +358,7 @@ class TestRateLimiting:
         await fetcher.close()
 
     @pytest.mark.asyncio
-    async def test_different_domains_no_delay(self, tmp_path):
+    async def test_different_domains_no_delay(self, tmp_path, monkeypatch):
         """Requests to different domains should NOT be delayed."""
         config = ScrapeConfig(
             mode="quick",
@@ -373,13 +373,22 @@ class TestRateLimiting:
         mock_client.get.return_value = make_response(200, "x" * 600)
         fetcher._client = mock_client
 
-        import time
+        # Track whether asyncio.sleep was called (it shouldn't be for different domains)
+        import asyncio
 
-        start = time.monotonic()
+        sleep_calls: list[float] = []
+        original_sleep = asyncio.sleep
+
+        async def tracking_sleep(delay, *args, **kwargs):
+            sleep_calls.append(delay)
+            # Don't actually sleep — just record the call
+            return await original_sleep(0)
+
+        monkeypatch.setattr(asyncio, "sleep", tracking_sleep)
+
         await fetcher.fetch_one("https://a.com/docs/page")
         await fetcher.fetch_one("https://b.com/docs/page")
-        elapsed = time.monotonic() - start
 
-        # Should be fast since different domains
-        assert elapsed < 0.4
+        # No rate-limit sleep should fire since the domains differ
+        assert sleep_calls == []
         await fetcher.close()
