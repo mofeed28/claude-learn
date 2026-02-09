@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="520" viewBox="0 0 850 520">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap');
+      .term-bg { fill: #0d1117; }
+      .title-bar { fill: #161b22; }
+      .text { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, monospace; font-size: 13px; }
+      .prompt { fill: #7ee787; }
+      .command { fill: #e6edf3; font-weight: bold; }
+      .dim { fill: #8b949e; }
+      .info { fill: #58a6ff; }
+      .success { fill: #7ee787; }
+      .warning { fill: #d29922; }
+      .error { fill: #f85149; }
+      .highlight { fill: #f0883e; }
+      .white { fill: #e6edf3; }
+      .purple { fill: #d2a8ff; }
+      .cyan { fill: #79c0ff; }
+      .header { fill: #e6edf3; font-weight: bold; }
+      .title-text { fill: #8b949e; font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace; font-size: 12px; }
+    </style>
+  </defs>
+
+  <!-- Window frame -->
+  <rect class="term-bg" width="850" height="520" rx="10" ry="10"/>
+  <rect class="title-bar" width="850" height="38" rx="10" ry="10"/>
+  <rect class="title-bar" x="0" y="28" width="850" height="10"/>
+
+  <!-- Traffic lights -->
+  <circle cx="20" cy="19" r="6.5" fill="#ff5f57"/>
+  <circle cx="40" cy="19" r="6.5" fill="#febc2e"/>
+  <circle cx="60" cy="19" r="6.5" fill="#28c840"/>
+
+  <text x="425" y="23" text-anchor="middle" class="title-text">claude — /learn-audit</text>
+
+  <!-- Terminal content -->
+  <g transform="translate(20, 58)">
+    <text y="0" class="text prompt">❯ <tspan class="command">/learn-audit stripe</tspan></text>
+
+    <text y="32" class="text info">Auditing skill: <tspan class="white">stripe</tspan></text>
+
+    <!-- Quality Gates Section -->
+    <text y="64" class="text header">Quality Gates (12 checks)</text>
+
+    <text y="92" class="text success"> ✓ <tspan class="dim">G1  Frontmatter has all required fields</tspan></text>
+    <text y="112" class="text success"> ✓ <tspan class="dim">G2  Description is 20+ words with trigger keywords</tspan></text>
+    <text y="132" class="text success"> ✓ <tspan class="dim">G3  All code blocks have language specifiers</tspan></text>
+    <text y="152" class="text success"> ✓ <tspan class="dim">G4  All code examples include imports</tspan></text>
+    <text y="172" class="text success"> ✓ <tspan class="dim">G5  No `any` types in TypeScript examples</tspan></text>
+    <text y="192" class="text success"> ✓ <tspan class="dim">G6  Tables have consistent column counts</tspan></text>
+    <text y="212" class="text success"> ✓ <tspan class="dim">G7  Minimum code examples met (6/4 required)</tspan></text>
+    <text y="232" class="text success"> ✓ <tspan class="dim">G8  No TODO/TBD/placeholder text</tspan></text>
+    <text y="252" class="text success"> ✓ <tspan class="dim">G9  Quick Reference has at least one table</tspan></text>
+    <text y="272" class="text success"> ✓ <tspan class="dim">G10 Error Handling section is a table</tspan></text>
+    <text y="292" class="text success"> ✓ <tspan class="dim">G11 File length in range (562 lines, max 600)</tspan></text>
+    <text y="312" class="text success"> ✓ <tspan class="dim">G12 No duplicate sections</tspan></text>
+
+    <!-- Scoring rubric -->
+    <text y="348" class="text header">Quality Scores</text>
+
+    <text y="376" class="text dim">  Completeness   <tspan class="success">█████████░</tspan>  <tspan class="white">9/10</tspan></text>
+    <text y="396" class="text dim">  Accuracy       <tspan class="success">█████████░</tspan>  <tspan class="white">9/10</tspan></text>
+    <text y="416" class="text dim">  Code Quality   <tspan class="success">██████████</tspan>  <tspan class="white">10/10</tspan></text>
+    <text y="436" class="text dim">  Trigger Cov.   <tspan class="success">████████░░</tspan>  <tspan class="white">8/10</tspan></text>
+
+    <!-- Result -->
+    <text y="468" class="text success">✔ Grade: A  (55/60)  —  All 12 gates passed</text>
+  </g>
+</svg>

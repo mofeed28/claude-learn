@@ -15,6 +15,10 @@
 
 Claude searches the web, scrapes the docs, and generates a skill file — all using built-in tools you already have.
 
+<p align="center">
+  <img src="assets/learn-demo.svg" alt="learn command demo" width="800"/>
+</p>
+
 ---
 
 ## Why?
@@ -186,6 +190,10 @@ Smart update with staleness detection:
 
 Shows a rich table with type, version, language, generated date, staleness status, and quality grade (A/B/C).
 
+<p align="center">
+  <img src="assets/learn-list-demo.svg" alt="learn-list command demo" width="800"/>
+</p>
+
 ### `/learn-audit` — Quality check skills
 
 ```
@@ -195,6 +203,10 @@ Shows a rich table with type, version, language, generated date, staleness statu
 ```
 
 Runs 27 quality checks across 4 categories (frontmatter, structure, code quality, formatting) without re-scraping. Assigns a letter grade (A-D) and reports exactly what's wrong. With `--fix`, automatically repairs issues that don't require web scraping (missing frontmatter fields, bare code blocks, pseudocode comments, etc.).
+
+<p align="center">
+  <img src="assets/learn-audit-demo.svg" alt="learn-audit command demo" width="800"/>
+</p>
 
 ### `/learn-delete` — Remove a skill
 
@@ -219,6 +231,10 @@ A structured `SKILL.md` file that Claude Code automatically picks up:
   react-hooks/
     SKILL.md
 ```
+
+<p align="center">
+  <img src="assets/skill-output-demo.svg" alt="generated skill file preview" width="800"/>
+</p>
 
 ### Library type awareness
 

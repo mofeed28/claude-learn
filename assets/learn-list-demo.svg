@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="420" viewBox="0 0 850 420">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap');
+      .term-bg { fill: #0d1117; }
+      .title-bar { fill: #161b22; }
+      .text { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, monospace; font-size: 13px; }
+      .prompt { fill: #7ee787; }
+      .command { fill: #e6edf3; font-weight: bold; }
+      .dim { fill: #8b949e; }
+      .info { fill: #58a6ff; }
+      .success { fill: #7ee787; }
+      .warning { fill: #d29922; }
+      .highlight { fill: #f0883e; }
+      .white { fill: #e6edf3; }
+      .purple { fill: #d2a8ff; }
+      .cyan { fill: #79c0ff; }
+      .header { fill: #e6edf3; font-weight: bold; }
+      .border { fill: #30363d; }
+      .title-text { fill: #8b949e; font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace; font-size: 12px; }
+    </style>
+  </defs>
+
+  <!-- Window frame -->
+  <rect class="term-bg" width="850" height="420" rx="10" ry="10"/>
+  <rect class="title-bar" width="850" height="38" rx="10" ry="10"/>
+  <rect class="title-bar" x="0" y="28" width="850" height="10"/>
+
+  <!-- Traffic lights -->
+  <circle cx="20" cy="19" r="6.5" fill="#ff5f57"/>
+  <circle cx="40" cy="19" r="6.5" fill="#febc2e"/>
+  <circle cx="60" cy="19" r="6.5" fill="#28c840"/>
+
+  <text x="425" y="23" text-anchor="middle" class="title-text">claude — /learn-list</text>
+
+  <!-- Terminal content -->
+  <g transform="translate(20, 58)">
+    <text y="0" class="text prompt">❯ <tspan class="command">/learn-list</tspan></text>
+
+    <text y="32" class="text info">Installed Skills (5)</text>
+
+    <!-- Table header -->
+    <text y="64" class="text dim">┌─────────────────┬─────────────┬─────────┬────────────┬────────────┬────────┬───────┐</text>
+    <text y="84" class="text header">│ Name            │ Type        │ Version │ Language   │ Generated  │ Stale? │ Grade │</text>
+    <text y="104" class="text dim">├─────────────────┼─────────────┼─────────┼────────────┼────────────┼────────┼───────┤</text>
+
+    <!-- Row 1: stripe -->
+    <text y="124" class="text dim">│ <tspan class="white">stripe</tspan>          │ <tspan class="purple">api-client</tspan>  │ <tspan class="cyan">17.5.0</tspan>  │ <tspan class="white">typescript</tspan> │ <tspan class="dim">2026-02-07</tspan> │ <tspan class="success">fresh</tspan>  │   <tspan class="success">A</tspan>   │</text>
+
+    <!-- Row 2: hono -->
+    <text y="144" class="text dim">│ <tspan class="white">hono</tspan>            │ <tspan class="purple">framework</tspan>   │ <tspan class="cyan">4.7.4</tspan>   │ <tspan class="white">typescript</tspan> │ <tspan class="dim">2026-02-07</tspan> │ <tspan class="success">fresh</tspan>  │   <tspan class="success">A</tspan>   │</text>
+
+    <!-- Row 3: drizzle-orm -->
+    <text y="164" class="text dim">│ <tspan class="white">drizzle-orm</tspan>     │ <tspan class="purple">orm-db</tspan>      │ <tspan class="cyan">0.39.1</tspan>  │ <tspan class="white">typescript</tspan> │ <tspan class="dim">2026-01-20</tspan> │ <tspan class="warning">stale</tspan>  │   <tspan class="success">A</tspan>   │</text>
+
+    <!-- Row 4: zod -->
+    <text y="184" class="text dim">│ <tspan class="white">zod</tspan>             │ <tspan class="purple">utility</tspan>     │ <tspan class="cyan">3.24.1</tspan>  │ <tspan class="white">typescript</tspan> │ <tspan class="dim">2026-02-05</tspan> │ <tspan class="success">fresh</tspan>  │   <tspan class="success">A</tspan>   │</text>
+
+    <!-- Row 5: openai -->
+    <text y="204" class="text dim">│ <tspan class="white">openai</tspan>          │ <tspan class="purple">api-client</tspan>  │ <tspan class="cyan">4.85.0</tspan>  │ <tspan class="white">python</tspan>     │ <tspan class="dim">2026-01-15</tspan> │ <tspan class="warning">stale</tspan>  │   <tspan class="info">B</tspan>   │</text>
+
+    <!-- Table footer -->
+    <text y="224" class="text dim">└─────────────────┴─────────────┴─────────┴────────────┴────────────┴────────┴───────┘</text>
+
+    <!-- Summary -->
+    <text y="260" class="text dim">Skills directory: <tspan class="cyan">~/.claude/skills/</tspan></text>
+    <text y="280" class="text dim">Grades: <tspan class="success">A</tspan> = 4  <tspan class="info">B</tspan> = 1  |  <tspan class="success">Fresh</tspan> = 3  <tspan class="warning">Stale</tspan> = 2</text>
+    <text y="300" class="text dim">Tip: Run <tspan class="white">/learn-update</tspan> to refresh stale skills</text>
+  </g>
+</svg>
