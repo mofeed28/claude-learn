@@ -2,6 +2,13 @@ You are a skill generator for Claude Code. Your job is to research any technolog
 
 The user wants to learn about: **$ARGUMENTS**
 
+CRITICAL EXECUTION RULES — READ BEFORE STARTING:
+1. You MUST execute EVERY phase in order (0 → 1 → 2 → 2.5 → 3 → 4 → 5 → 6 → 7). Do NOT skip phases. Do NOT combine phases.
+2. When a phase says "in parallel", you MUST use multiple tool calls in a SINGLE message. Do NOT run them one at a time.
+3. You MUST run the Glob check in Phase 5 BEFORE generating anything in Phase 6. This is non-negotiable.
+4. You MUST read the file back in Phase 7 and pass ALL quality gates before reporting. Do NOT skip verification.
+5. If you catch yourself skipping a phase, STOP and go back.
+
 ---
 
 ## Phase 0: Check for Runtime Scraper
@@ -162,17 +169,17 @@ After detecting the language, classify the topic into one of these library types
 
 ## Phase 3: Multi-Strategy Research
 
-Run these search strategies **in parallel** where possible. The goal is to find the best sources, not all sources.
+MANDATORY: Run Strategies A, B, C, and F searches in a SINGLE message with parallel tool calls. Do NOT run them one at a time. This means 8+ WebSearch calls in ONE message.
 
 **Before searching, build a URL queue.** As you discover URLs from search results, add them all to a running list. De-duplicate by normalized URL (strip trailing slashes, fragments, and tracking params like `utm_*`). Score each URL by source priority (see Phase 4) before fetching.
 
-### Strategy A: Official Docs
+### Strategy A: Official Docs (2 searches — run in parallel with B, C, F)
 ```
 WebSearch: "$TOPIC official documentation"
 WebSearch: "$TOPIC API reference"
 ```
 
-### Strategy B: GitHub Source
+### Strategy B: GitHub Source (2 searches — run in parallel with A, C, F)
 ```
 WebSearch: "$TOPIC github repository README"
 WebSearch: "site:github.com $TOPIC"
@@ -183,13 +190,15 @@ When you find the GitHub repo, also:
 2. Check for docs in the repo: `gh api repos/{owner}/{repo}/contents/docs` — queue any `.md` files found
 3. Check for a `docs` or `website` directory that might contain structured documentation
 
-### Strategy C: Practical Usage
+### Strategy C: Practical Usage (2 searches — run in parallel with A, B, F)
 ```
 WebSearch: "$TOPIC getting started tutorial examples"
 WebSearch: "$TOPIC cheat sheet quick reference"
 ```
 
-### Strategy D: Sitemap & Link Discovery
+^^^ Strategies A + B + C + F MUST all be launched in ONE message as parallel tool calls. ^^^
+
+### Strategy D: Sitemap & Link Discovery (run AFTER A-C-F complete)
 
 **This is a high-value strategy.** Before falling back to alternative sources, try to discover the full documentation structure:
 
@@ -230,7 +239,7 @@ If the official docs are JS-rendered SPAs that WebFetch can't scrape, try these 
 
 If a soft failure is detected, discard the result and move to the next source.
 
-### Strategy F: Package Registry
+### Strategy F: Package Registry (2 searches — run in parallel with A, B, C)
 Search the relevant package registry to get version info, README, and metadata:
 ```
 WebSearch: "site:npmjs.com $TOPIC"        (for JS/TS)
@@ -240,7 +249,7 @@ WebSearch: "site:pkg.go.dev $TOPIC"       (for Go)
 WebSearch: "site:rubygems.org $TOPIC"     (for Ruby)
 WebSearch: "site:hex.pm $TOPIC"           (for Elixir)
 ```
-Pick the registry that matches the detected `$LANGUAGE`, or search npm + pypi as defaults.
+Pick the 2 registries that match the detected `$LANGUAGE` (or npm + pypi as defaults) and include them in the parallel batch with A, B, C.
 
 From registry pages, extract: **current version**, **publish date**, **weekly downloads**, **peer dependencies**.
 
@@ -261,6 +270,8 @@ WebFetch: https://raw.githubusercontent.com/{owner}/{repo}/main/UPGRADING.md
 ---
 
 ## Phase 4: Scrape & Extract
+
+MANDATORY: You MUST fetch pages in parallel batches of 3-5 WebFetch calls per message. Do NOT fetch one page at a time. Each batch MUST be multiple tool calls in a SINGLE message.
 
 ### 4.1 URL Queue Management
 
@@ -364,13 +375,15 @@ As you extract content, track what information you've already collected. Before 
 
 ## Phase 5: Check for Existing Skill
 
-Before generating, check if a skill already exists:
+MANDATORY: You MUST run this Glob check BEFORE generating anything in Phase 6. Do NOT skip this step. If you find yourself writing the skill file without having run this Glob, STOP and run it now.
+
+First, derive the slug (see Phase 6 slug rules). Then run:
 ```
-Glob: ~/.claude/skills/$SLUG/SKILL.md
+Glob: ~/.claude/skills/{slug}/SKILL.md
 ```
 
-- If it exists, **read it first**. You are updating, not creating from scratch. Preserve any user customizations or notes (especially lines/sections marked with `<!-- user -->`). Inform the user you're updating an existing skill.
-- If it doesn't exist, create it fresh.
+- If it exists, **read it first** with the Read tool. You are UPDATING, not creating from scratch. Preserve any user customizations or notes (especially lines/sections marked with `<!-- user -->`). Inform the user: "Updating existing skill at ~/.claude/skills/{slug}/SKILL.md"
+- If it doesn't exist, inform the user: "Creating new skill: {slug}"
 
 ---
 
@@ -626,7 +639,7 @@ import { ... } from '...';
 
 ## Phase 7: Self-Critique & Quality Gate
 
-After writing the file, **read it back** with the Read tool and run it through a rigorous quality check. This is the most important phase — a bad skill file is worse than no skill file, because it teaches an agent wrong patterns.
+MANDATORY: You MUST read the file back with the Read tool. This is NOT optional — do NOT skip to the report. If ANY quality gate fails, you MUST fix the issue and re-read before reporting. A bad skill file is worse than no skill file, because it teaches an agent wrong patterns.
 
 ### 7.1 Quality Rubric (score each 0-10)
 
@@ -705,6 +718,27 @@ Tip: For more complete coverage, try:
   /learn {topic} --deep          (scrapes 25 sources)
   /learn ./path/to/local/docs    (best quality — direct from source)
 ```
+
+---
+
+## Execution Checklist
+
+Before completing, confirm you did ALL of the following. If you skipped any, go back and do it NOW:
+
+1. [ ] Phase 0: Checked for runtime scraper
+2. [ ] Phase 1: Parsed input type correctly (file/URL/topic/scoped/subtopic)
+3. [ ] Phase 2: Detected project language via Glob
+4. [ ] Phase 2.5: Classified library type
+5. [ ] Phase 3: Ran Strategies A+B+C+F searches in ONE parallel message (8+ WebSearch calls)
+6. [ ] Phase 3: Evaluated Strategies D, E, G for additional sources
+7. [ ] Phase 4: Fetched 3-5 pages per batch in parallel (NOT one at a time)
+8. [ ] Phase 5: Ran Glob to check for existing skill BEFORE generating
+9. [ ] Phase 6: Generated skill with complete structure, real code examples, proper frontmatter
+10. [ ] Phase 7: Read the file back with Read tool
+11. [ ] Phase 7: Passed ALL 12 quality gates (G1-G12)
+12. [ ] Phase 7: Reported quality scores, sources, and coverage to user
+
+If ANY box above is unchecked, you have NOT completed the task. Go back and finish.
 
 ---
 
